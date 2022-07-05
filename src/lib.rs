@@ -1,9 +1,90 @@
+use std::mem;
+use std::mem::MaybeUninit;
 use wgpu::util::DeviceExt;
+use cgmath::prelude::*;
+use cgmath::Vector3;
+
+const BLOCK_SIZE: f32 = 50.0;
+const BLOCK_COUNT: usize = 512;
+const BLOCK_GAP: f32 = 10.0;
+
+type Mat4 = [[f32; 4]; 4];
+
+#[rustfmt::skip]
+pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 0.5, 0.0,
+    0.0, 0.0, 0.5, 1.0,
+);
+
+//Camera andy
+
+// we are gonna use an ortho camera
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct CameraUniform {
+    view_proj: Mat4,
+}
+
+// TODO: update camera uniform on resize
+impl CameraUniform {
+    fn new(size: winit::dpi::PhysicalSize<u32>) -> Self {
+        let view_proj: Mat4 = {
+            let proj = cgmath::ortho(0.0, size.width as f32, size.height as f32, 0.0, -1.0, 1.0);
+            (OPENGL_TO_WGPU_MATRIX * proj).into()
+        };
+
+        Self {
+            view_proj
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct ModelUniform {
+    //TODO: this stack overflows if there are 1024 blocks. haha.
+    model: [Mat4; BLOCK_COUNT],
+}
+
+impl ModelUniform {
+    fn new() -> Self {
+        let mut i = 0;
+        let mut j = 0;
+        let model = [(); BLOCK_COUNT]
+            .map(|_| {
+                let model: Mat4 = cgmath::Matrix4::from_translation(
+                    Vector3 {
+                        x: (BLOCK_SIZE + BLOCK_GAP) * i as f32,
+                        y: (BLOCK_SIZE + BLOCK_GAP) * j as f32,
+                        z: 0.0,
+                    }).into();
+                i += 1;
+                if i > 10 {
+                    i = 0;
+                    j += 1;
+                }
+
+                return model;
+            });
+
+        Self {
+            model
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
     position: [f32; 3],
+}
+
+struct BindGroupSetThing<T> {
+    the_data: T,
+    buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
 }
 
 impl Vertex {
@@ -21,7 +102,6 @@ impl Vertex {
     }
 }
 
-
 const VERTICES: &[Vertex] = &[
     /*
     (0)-----(1)
@@ -30,10 +110,10 @@ const VERTICES: &[Vertex] = &[
      |       |
     (2)-----(3)
      */
-    Vertex { position: [-0.5, 0.5, 0.0] },
-    Vertex { position: [0.5, 0.5, 0.0] },
-    Vertex { position: [-0.5, -0.5, 0.0] },
-    Vertex { position: [0.5, -0.5, 0.0] },
+    Vertex { position: [0.0, 0.0, 0.0] },
+    Vertex { position: [BLOCK_SIZE, 0.0, 0.0] },
+    Vertex { position: [0.0, BLOCK_SIZE, 0.0] },
+    Vertex { position: [BLOCK_SIZE, BLOCK_SIZE, 0.0] },
 ];
 
 const INDICES: &[u16] = &[
@@ -51,6 +131,8 @@ pub struct State {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
+    model_uniform_set: BindGroupSetThing<ModelUniform>,
+    camera_uniform_set: BindGroupSetThing<CameraUniform>,
 }
 
 impl State {
@@ -93,17 +175,8 @@ impl State {
         };
         surface.configure(&device, &config);
 
-        // keep going here
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
-        let render_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[],
-                push_constant_ranges: &[],
-            });
-
-        let render_pipeline = Self::create_pipeline(&device, &config, &shader, &render_pipeline_layout);
 
         let vertex_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -123,6 +196,112 @@ impl State {
 
         let num_indices = INDICES.len() as u32;
 
+        // -- bind descriptors --
+
+        // we need an ortho camera
+        let camera_uniform = CameraUniform::new(size);
+        let camera_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Camera Buffer"),
+                contents: bytemuck::cast_slice(&[camera_uniform]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST
+            }
+        );
+        let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }
+            ],
+            label: Some("camera_bind_group_layout"),
+        });
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &camera_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                }
+            ],
+            label: Some("camera_bind_group"),
+        });
+
+        let camera_uniform_set = BindGroupSetThing {
+            the_data: camera_uniform,
+            buffer: camera_buffer,
+            bind_group: camera_bind_group,
+        };
+
+        // we need a model matrix and color
+
+        // model matrix : we need to create the buffer and the bind group
+        let model_uniform = ModelUniform::new();
+
+        let model_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("model matrix buffer"),
+                contents: bytemuck::cast_slice(&[model_uniform]),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            }
+        );
+
+        let model_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage {
+                            read_only: true
+                        },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }
+            ],
+            label: Some("model_bind_group_layout"),
+        });
+
+        let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &model_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: model_buffer.as_entire_binding(),
+                }
+            ],
+            label: Some("model_bind_group"),
+        });
+
+        let model_uniform_set = BindGroupSetThing {
+            the_data: model_uniform,
+            buffer: model_buffer,
+            bind_group: model_bind_group,
+        };
+
+        // -- bind group end --
+
+        // creating pipeline
+        let render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Render Pipeline Layout"),
+                bind_group_layouts: &[
+                    &camera_bind_group_layout,
+                    &model_bind_group_layout
+                ],
+                push_constant_ranges: &[],
+            });
+
+        let render_pipeline = Self::create_pipeline(&device, &config, &shader, &render_pipeline_layout);
+
         Self {
             surface,
             device,
@@ -132,7 +311,9 @@ impl State {
             render_pipeline,
             vertex_buffer,
             index_buffer,
-            num_indices
+            num_indices,
+            model_uniform_set,
+            camera_uniform_set
         }
     }
 
@@ -219,9 +400,11 @@ impl State {
                 depth_stencil_attachment: None,
             });
             render_pass.set_pipeline(&self.render_pipeline); // 2.
+            render_pass.set_bind_group(0, &self.camera_uniform_set.bind_group, &[]);
+            render_pass.set_bind_group(1, &self.model_uniform_set.bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); // 1.
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..1); // 2.
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..BLOCK_COUNT as _); // 2.
         }
 
         // submit will accept anything that implements IntoIter
