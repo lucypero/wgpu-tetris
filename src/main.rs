@@ -13,12 +13,18 @@ fn main() {
 pub async fn run() {
     env_logger::init();
     let event_loop = EventLoop::new();
+
+    let inner_size = winit::dpi::PhysicalSize{
+        width: wgpu_tetris::WINDOW_INNER_WIDTH,
+        height: wgpu_tetris::WINDOW_INNER_HEIGHT,
+    };
+
     let window = WindowBuilder::new()
         .with_title("wgpu-tetris")
+        .with_inner_size(inner_size)
         .build(&event_loop).unwrap();
 
     let mut state = wgpu_tetris::State::new(&window).await;
-
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {

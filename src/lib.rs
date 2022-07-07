@@ -1,14 +1,49 @@
+extern crate core;
+
 use std::mem;
 use std::mem::MaybeUninit;
-use wgpu::util::DeviceExt;
+use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use cgmath::prelude::*;
-use cgmath::Vector3;
+use cgmath::{Matrix4, Vector3};
+use rand::Rng;
 
-const BLOCK_SIZE: f32 = 50.0;
-const BLOCK_COUNT: usize = 512;
-const BLOCK_GAP: f32 = 10.0;
+pub const WINDOW_INNER_WIDTH: u32 = 1000;
+pub const WINDOW_INNER_HEIGHT: u32 = 600;
+const BLOCK_SIZE: f32 = 20.0;
+const BLOCK_COUNT: usize = 10240;
+const BLOCK_GAP: f32 = 0.0;
 
-type Mat4 = [[f32; 4]; 4];
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vec4([f32; 4]);
+
+impl From<[f32; 4]> for Vec4 {
+    fn from(the_vec: [f32; 4]) -> Self {
+        Vec4(the_vec)
+    }
+}
+
+impl From<cgmath::Vector4<f32>> for Vec4 {
+    fn from(the_vec: cgmath::Vector4<f32>) -> Self {
+        Vec4(the_vec.into())
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct Mat4([[f32; 4]; 4]);
+
+impl From<[[f32; 4]; 4]> for Mat4 {
+    fn from(the_mat: [[f32; 4]; 4]) -> Self {
+        Mat4(the_mat)
+    }
+}
+
+impl From<cgmath::Matrix4<f32>> for Mat4 {
+    fn from(the_mat: cgmath::Matrix4<f32>) -> Self {
+        Mat4(the_mat.into())
+    }
+}
 
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
@@ -30,55 +65,73 @@ struct CameraUniform {
 // TODO: update camera uniform on resize
 impl CameraUniform {
     fn new(size: winit::dpi::PhysicalSize<u32>) -> Self {
-        let view_proj: Mat4 = {
+        let view_proj: [[f32; 4]; 4] = {
             let proj = cgmath::ortho(0.0, size.width as f32, size.height as f32, 0.0, -1.0, 1.0);
             (OPENGL_TO_WGPU_MATRIX * proj).into()
         };
 
         Self {
-            view_proj
+            view_proj: view_proj.into(),
         }
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct ModelUniform {
     //TODO: this stack overflows if there are 1024 blocks. haha.
-    model: [Mat4; BLOCK_COUNT],
+    model: Vec<Mat4>,
 }
 
 impl ModelUniform {
-    fn new() -> Self {
-        let mut i = 0;
-        let mut j = 0;
-        let model = [(); BLOCK_COUNT]
-            .map(|_| {
-                let model: Mat4 = cgmath::Matrix4::from_translation(
-                    Vector3 {
-                        x: (BLOCK_SIZE + BLOCK_GAP) * i as f32,
-                        y: (BLOCK_SIZE + BLOCK_GAP) * j as f32,
-                        z: 0.0,
-                    }).into();
-                i += 1;
-                if i > 10 {
-                    i = 0;
-                    j += 1;
-                }
+    fn new(size: winit::dpi::PhysicalSize<u32>) -> Self {
+        let mut i_x = 0;
+        let mut y = 0;
+        let mut model_vec: Vec<Mat4> = Vec::with_capacity(BLOCK_COUNT);
 
-                return model;
-            });
+        for _ in 0..BLOCK_COUNT {
+            let model: [[f32; 4]; 4] = cgmath::Matrix4::from_translation(
+                Vector3 {
+                    x: (BLOCK_SIZE + BLOCK_GAP) * i_x as f32,
+                    y: (BLOCK_SIZE + BLOCK_GAP) * y as f32,
+                    z: 0.0,
+                }).into();
+            i_x += 1;
+            if i_x as f32 * BLOCK_SIZE > size.width as f32 {
+                i_x = 0;
+                y += 1;
+            }
+
+            model_vec.push(model.into());
+        }
 
         Self {
-            model
+            model: model_vec
         }
     }
 }
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex {
-    position: [f32; 3],
+struct ColorUniform {
+    color: Vec<Vec4>,
+}
+
+impl ColorUniform {
+    fn new() -> Self {
+        let mut rng = rand::thread_rng();
+        let mut color_vec = Vec::with_capacity(BLOCK_COUNT);
+
+        for i in 0..BLOCK_COUNT {
+            let color: Vec4 = cgmath::Vector4 {
+                x: rng.gen_range(0.0..=1.0),
+                y: rng.gen_range(0.0..=1.0),
+                z: rng.gen_range(0.0..=1.0),
+                w: 1.0,
+            }.into();
+            color_vec.push(color);
+        }
+
+        Self {
+            color: color_vec
+        }
+    }
 }
 
 struct BindGroupSetThing<T> {
@@ -87,17 +140,32 @@ struct BindGroupSetThing<T> {
     bind_group: wgpu::BindGroup,
 }
 
-impl Vertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 1] =
-        wgpu::vertex_attr_array![0 => Float32x3];
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    position: [f32; 3],
+    tex_coords: [f32; 2],
+}
 
+impl Vertex {
     fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
         use std::mem;
 
         wgpu::VertexBufferLayout {
             array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRIBS,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+            ],
         }
     }
 }
@@ -110,10 +178,10 @@ const VERTICES: &[Vertex] = &[
      |       |
     (2)-----(3)
      */
-    Vertex { position: [0.0, 0.0, 0.0] },
-    Vertex { position: [BLOCK_SIZE, 0.0, 0.0] },
-    Vertex { position: [0.0, BLOCK_SIZE, 0.0] },
-    Vertex { position: [BLOCK_SIZE, BLOCK_SIZE, 0.0] },
+    Vertex { position: [0.0, 0.0, 0.0], tex_coords: [0.0, 0.0] },
+    Vertex { position: [BLOCK_SIZE, 0.0, 0.0], tex_coords: [1.0, 0.0] },
+    Vertex { position: [0.0, BLOCK_SIZE, 0.0], tex_coords: [0.0, 1.0] },
+    Vertex { position: [BLOCK_SIZE, BLOCK_SIZE, 0.0], tex_coords: [1.0, 1.0] },
 ];
 
 const INDICES: &[u16] = &[
@@ -131,13 +199,16 @@ pub struct State {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
-    model_uniform_set: BindGroupSetThing<ModelUniform>,
     camera_uniform_set: BindGroupSetThing<CameraUniform>,
+    model_uniform_set: BindGroupSetThing<ModelUniform>,
+    color_uniform_set: BindGroupSetThing<ColorUniform>,
+    diffuse_bind_group: wgpu::BindGroup,
 }
 
 impl State {
     pub async fn new(window: &winit::window::Window) -> Self {
         let size = window.inner_size();
+        println!("Kots on the screen (approx): {}", (size.width as f32 / BLOCK_SIZE) * (size.height as f32 / BLOCK_SIZE));
 
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
@@ -204,7 +275,7 @@ impl State {
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Camera Buffer"),
                 contents: bytemuck::cast_slice(&[camera_uniform]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             }
         );
         let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -242,12 +313,12 @@ impl State {
         // we need a model matrix and color
 
         // model matrix : we need to create the buffer and the bind group
-        let model_uniform = ModelUniform::new();
+        let model_uniform = ModelUniform::new(size);
 
         let model_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("model matrix buffer"),
-                contents: bytemuck::cast_slice(&[model_uniform]),
+                contents: bytemuck::cast_slice(model_uniform.model.as_slice()),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             }
         );
@@ -287,15 +358,168 @@ impl State {
             bind_group: model_bind_group,
         };
 
+        // color uniform
+        let color_uniform = ColorUniform::new();
+
+        let color_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("color buffer"),
+                contents: bytemuck::cast_slice(color_uniform.color.as_slice()),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            }
+        );
+
+        let color_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage {
+                            read_only: true
+                        },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }
+            ],
+            label: Some("color_bind_group_layout"),
+        });
+
+        let color_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &color_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: color_buffer.as_entire_binding(),
+                }
+            ],
+            label: Some("model_bind_group"),
+        });
+
+        let color_uniform_set = BindGroupSetThing {
+            the_data: color_uniform,
+            buffer: color_buffer,
+            bind_group: color_bind_group,
+        };
+
+        // the texture
+
+        let diffuse_bytes = include_bytes!("evil-cat-square.png");
+        let diffuse_image = image::load_from_memory(diffuse_bytes).unwrap();
+        let diffuse_rgba = diffuse_image.to_rgba8();
+
+        use image::GenericImageView;
+        let dimensions = diffuse_image.dimensions();
+
+        let texture_size = wgpu::Extent3d {
+            width: dimensions.0,
+            height: dimensions.1,
+            depth_or_array_layers: 1,
+        };
+        let diffuse_texture = device.create_texture(
+            &wgpu::TextureDescriptor {
+                // All textures are stored as 3D, we represent our 2D texture
+                // by setting depth to 1.
+                size: texture_size,
+                mip_level_count: 1, // We'll talk about this a little later
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                // Most images are stored using sRGB so we need to reflect that here.
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                // TEXTURE_BINDING tells wgpu that we want to use this texture in shaders
+                // COPY_DST means that we want to copy data to this texture
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                label: Some("diffuse_texture"),
+            }
+        );
+
+        queue.write_texture(
+            // Tells wgpu where to copy the pixel data
+            wgpu::ImageCopyTexture {
+                texture: &diffuse_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            // The actual pixel data
+            &diffuse_rgba,
+            // The layout of the texture
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: std::num::NonZeroU32::new(4 * dimensions.0),
+                rows_per_image: std::num::NonZeroU32::new(dimensions.1),
+            },
+            texture_size,
+        );
+
+        // We don't need to configure the texture view much, so let's
+        // let wgpu define it.
+        let diffuse_texture_view = diffuse_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let diffuse_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        // This should match the filterable field of the
+                        // corresponding Texture entry above.
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+                label: Some("texture_bind_group_layout"),
+            });
+
+        let diffuse_bind_group = device.create_bind_group(
+            &wgpu::BindGroupDescriptor {
+                layout: &texture_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
+                    }
+                ],
+                label: Some("diffuse_bind_group"),
+            }
+        );
+
         // -- bind group end --
 
         // creating pipeline
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[
+                bind_group_layouts: &[ // THE ORDER HERE MATTERS !!!!
                     &camera_bind_group_layout,
-                    &model_bind_group_layout
+                    &model_bind_group_layout,
+                    &color_bind_group_layout,
+                    &texture_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -313,7 +537,9 @@ impl State {
             index_buffer,
             num_indices,
             model_uniform_set,
-            camera_uniform_set
+            camera_uniform_set,
+            color_uniform_set,
+            diffuse_bind_group,
         }
     }
 
@@ -367,7 +593,23 @@ impl State {
         false
     }
 
-    pub fn update(&mut self) {}
+    pub fn update(&mut self) {
+        let mut rng = rand::thread_rng();
+
+        // //move around all the transform matrices
+        // for i in &mut self.model_uniform_set.the_data.model {
+        //     let new_mat = Matrix4::from(i.0) * Matrix4::from_translation(Vector3 {
+        //         x: rng.gen_range(-10.0..10.0),
+        //         y: rng.gen_range(-10.0..10.0),
+        //         z: 0.0,
+        //     });
+        //     i.0 = new_mat.into();
+        // }
+        //
+        // self.queue.write_buffer(&self.model_uniform_set.buffer,
+        //                         0,
+        //                         bytemuck::cast_slice(self.model_uniform_set.the_data.model.as_slice()));
+    }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
@@ -402,6 +644,8 @@ impl State {
             render_pass.set_pipeline(&self.render_pipeline); // 2.
             render_pass.set_bind_group(0, &self.camera_uniform_set.bind_group, &[]);
             render_pass.set_bind_group(1, &self.model_uniform_set.bind_group, &[]);
+            render_pass.set_bind_group(2, &self.color_uniform_set.bind_group, &[]);
+            render_pass.set_bind_group(3, &self.diffuse_bind_group, &[]); // NEW!
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); // 1.
             render_pass.draw_indexed(0..self.num_indices, 0, 0..BLOCK_COUNT as _); // 2.
