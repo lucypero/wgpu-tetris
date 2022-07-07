@@ -26,6 +26,8 @@ pub async fn run() {
 
     let mut state = wgpu_tetris::State::new(&window).await;
 
+    let mut frames: u64 = 0;
+
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
             ref event,
@@ -52,7 +54,11 @@ pub async fn run() {
             }
         }
         Event::RedrawRequested(window_id) if window_id == window.id() => {
-            state.update();
+            if frames == (60 / 5) {
+                state.update();
+                frames = 0;
+            }
+            frames += 1;
             match state.render() {
                 Ok(_) => {}
                 // Reconfigure the surface if lost

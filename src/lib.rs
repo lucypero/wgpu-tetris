@@ -9,7 +9,7 @@ use rand::Rng;
 
 pub const WINDOW_INNER_WIDTH: u32 = 1000;
 pub const WINDOW_INNER_HEIGHT: u32 = 600;
-const BLOCK_SIZE: f32 = 20.0;
+const BLOCK_SIZE: f32 = 40.0;
 const BLOCK_COUNT: usize = 10240;
 const BLOCK_GAP: f32 = 0.0;
 
@@ -406,7 +406,7 @@ impl State {
 
         // the texture
 
-        let diffuse_bytes = include_bytes!("evil-cat-square.png");
+        let diffuse_bytes = include_bytes!("block.png");
         let diffuse_image = image::load_from_memory(diffuse_bytes).unwrap();
         let diffuse_rgba = diffuse_image.to_rgba8();
 
@@ -461,7 +461,7 @@ impl State {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
@@ -594,21 +594,21 @@ impl State {
     }
 
     pub fn update(&mut self) {
+        // places blocks in random spots on the grid
         let mut rng = rand::thread_rng();
 
-        // //move around all the transform matrices
-        // for i in &mut self.model_uniform_set.the_data.model {
-        //     let new_mat = Matrix4::from(i.0) * Matrix4::from_translation(Vector3 {
-        //         x: rng.gen_range(-10.0..10.0),
-        //         y: rng.gen_range(-10.0..10.0),
-        //         z: 0.0,
-        //     });
-        //     i.0 = new_mat.into();
-        // }
-        //
-        // self.queue.write_buffer(&self.model_uniform_set.buffer,
-        //                         0,
-        //                         bytemuck::cast_slice(self.model_uniform_set.the_data.model.as_slice()));
+        for i in &mut self.model_uniform_set.the_data.model {
+            let new_mat = Matrix4::from_translation(Vector3 {
+                x: BLOCK_SIZE * rng.gen_range(0..(WINDOW_INNER_WIDTH as f32 / BLOCK_SIZE) as u32) as f32,
+                y: BLOCK_SIZE * rng.gen_range(0..(WINDOW_INNER_HEIGHT as f32 / BLOCK_SIZE) as u32) as f32,
+                z: 0.0,
+            });
+            i.0 = new_mat.into();
+        }
+
+        self.queue.write_buffer(&self.model_uniform_set.buffer,
+                                0,
+                                bytemuck::cast_slice(self.model_uniform_set.the_data.model.as_slice()));
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
