@@ -750,6 +750,8 @@ impl State {
     pub fn update(&mut self) {
         const CAM_SPEED: f32 = 20.0;
         const CAM_ZOOM_STEP: f32 = 0.03;
+        const CAM_ZOOM_MIN: f32 = 0.13;
+        const CAM_ZOOM_MAX: f32 = 4.0;
 
         // TODO: implement zoom w + and - keys.
 
@@ -768,9 +770,15 @@ impl State {
         }
         if self.controls.plus_pressed {
             self.camera.zoom_amount -= CAM_ZOOM_STEP;
+            if self.camera.zoom_amount <= CAM_ZOOM_MIN {
+                self.camera.zoom_amount = CAM_ZOOM_MIN;
+            }
         }
         if self.controls.minus_pressed {
             self.camera.zoom_amount += CAM_ZOOM_STEP;
+            if self.camera.zoom_amount >= CAM_ZOOM_MAX {
+                self.camera.zoom_amount = CAM_ZOOM_MAX;
+            }
         }
 
         self.camera.update_buffer(&self.queue);
