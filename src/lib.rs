@@ -4,12 +4,14 @@ use std::mem;
 use std::mem::MaybeUninit;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use cgmath::prelude::*;
-use cgmath::{Matrix4, Vector3};
+use cgmath::{Matrix4, Vector2, Vector3};
 use rand::Rng;
+use winit::event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent};
+
 
 pub const WINDOW_INNER_WIDTH: u32 = 1000;
 pub const WINDOW_INNER_HEIGHT: u32 = 600;
-const BLOCK_SIZE: f32 = 40.0;
+const BLOCK_SIZE: f32 = 20.0;
 const BLOCK_COUNT: usize = 10240;
 const BLOCK_GAP: f32 = 0.0;
 
@@ -55,6 +57,64 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
 
 //Camera andy
 
+struct Camera {
+    initial_size: Vector2<f32>,
+    position: Vector2<f32>,
+    zoom_amount: f32,
+    bind_group: BindGroupSetThing<CameraUniform>,
+}
+
+impl Camera {
+
+    // do not use this
+    fn change_zoom(&mut self, new_zoom: f32) {
+        // let mut new_mat: Matrix4<f32> = Matrix4::from(self.camera.bind_group.the_data.view_proj.0);
+        // new_mat = new_mat * Matrix4::from_scale(CAM_ZOOM_STEP);
+        // self.camera.bind_group.the_data.view_proj = Mat4::from(new_mat);
+
+        let view_proj: [[f32; 4]; 4] = {
+            let proj = cgmath::ortho(0.0, self.initial_size.x * new_zoom, self.initial_size.y * new_zoom, 0.0, -1.0, 1.0);
+            (OPENGL_TO_WGPU_MATRIX * proj).into()
+        };
+
+        self.bind_group.the_data.view_proj = view_proj.into();
+        self.zoom_amount = new_zoom;
+    }
+
+    // do not use this
+    fn pan(&mut self, vec: Vector3<f32>) {
+        let mut new_mat: Matrix4<f32> = Matrix4::from(self.bind_group.the_data.view_proj.0);
+        new_mat = new_mat * Matrix4::from_translation(vec);
+        self.bind_group.the_data.view_proj = Mat4::from(new_mat);
+    }
+
+    fn update_buffer(&mut self, queue: &wgpu::Queue) {
+
+        // write new matrix in the uniform
+
+        // transformation
+        let t_mat = Matrix4::from_translation(Vector3::new(self.position.x, self.position.y, 0.0));
+        self.bind_group.the_data.view_proj = Mat4::from(t_mat);
+
+        // zoom
+        let view_proj = {
+            let new_vec = self.initial_size * self.zoom_amount;
+            let proj = cgmath::ortho(0.0, new_vec.x, new_vec.y, 0.0, -1.0, 1.0);
+            (OPENGL_TO_WGPU_MATRIX * proj)
+        };
+
+        let new_mat: [[f32; 4]; 4] = (view_proj * t_mat).into();
+        self.bind_group.the_data.view_proj = new_mat.into();
+
+        // write new data to buffer
+        queue.write_buffer(
+            &self.bind_group.buffer,
+            0,
+            bytemuck::cast_slice(&[self.bind_group.the_data]),
+        );
+    }
+}
+
 // we are gonna use an ortho camera
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -64,9 +124,9 @@ struct CameraUniform {
 
 // TODO: update camera uniform on resize
 impl CameraUniform {
-    fn new(size: winit::dpi::PhysicalSize<u32>) -> Self {
+    fn new(size: Vector2<f32>) -> Self {
         let view_proj: [[f32; 4]; 4] = {
-            let proj = cgmath::ortho(0.0, size.width as f32, size.height as f32, 0.0, -1.0, 1.0);
+            let proj = cgmath::ortho(0.0, size.x, size.y, 0.0, -1.0, 1.0);
             (OPENGL_TO_WGPU_MATRIX * proj).into()
         };
 
@@ -189,6 +249,28 @@ const INDICES: &[u16] = &[
     2, 3, 1
 ];
 
+struct Controls {
+    w_pressed: bool,
+    a_pressed: bool,
+    s_pressed: bool,
+    d_pressed: bool,
+    plus_pressed: bool,
+    minus_pressed: bool,
+}
+
+impl Controls {
+    fn new() -> Self {
+        Self {
+            w_pressed: false,
+            a_pressed: false,
+            s_pressed: false,
+            d_pressed: false,
+            plus_pressed: false,
+            minus_pressed: false,
+        }
+    }
+}
+
 pub struct State {
     surface: wgpu::Surface,
     device: wgpu::Device,
@@ -199,10 +281,11 @@ pub struct State {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
-    camera_uniform_set: BindGroupSetThing<CameraUniform>,
+    camera: Camera,
     model_uniform_set: BindGroupSetThing<ModelUniform>,
     color_uniform_set: BindGroupSetThing<ColorUniform>,
     diffuse_bind_group: wgpu::BindGroup,
+    controls: Controls,
 }
 
 impl State {
@@ -270,7 +353,7 @@ impl State {
         // -- bind descriptors --
 
         // we need an ortho camera
-        let camera_uniform = CameraUniform::new(size);
+        let camera_uniform = CameraUniform::new(Vector2::new(size.width as f32, size.height as f32));
         let camera_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Camera Buffer"),
@@ -308,6 +391,13 @@ impl State {
             the_data: camera_uniform,
             buffer: camera_buffer,
             bind_group: camera_bind_group,
+        };
+
+        let camera = Camera {
+            initial_size: Vector2::new(size.width as f32, size.height as f32),
+            position: Vector2::new(0.0, 0.0),
+            zoom_amount: 1.0,
+            bind_group: camera_uniform_set,
         };
 
         // we need a model matrix and color
@@ -537,9 +627,10 @@ impl State {
             index_buffer,
             num_indices,
             model_uniform_set,
-            camera_uniform_set,
+            camera,
             color_uniform_set,
             diffuse_bind_group,
+            controls: Controls::new(),
         }
     }
 
@@ -590,10 +681,55 @@ impl State {
     }
 
     pub fn input(&mut self, event: &winit::event::WindowEvent) -> bool {
-        false
+
+        // matches!(event, WindowEvent::KeyboardInput {})
+
+        match event {
+            WindowEvent::KeyboardInput {
+                input: KeyboardInput {
+                    state,
+                    virtual_keycode,
+                    ..
+                },
+                ..
+            } => {
+                let pressed = match state {
+                    ElementState::Pressed => true,
+                    ElementState::Released => false,
+                };
+
+                match virtual_keycode {
+                    Some(vk) => match vk {
+                        VirtualKeyCode::W => {
+                            self.controls.w_pressed = pressed;
+                        }
+                        VirtualKeyCode::A => {
+                            self.controls.a_pressed = pressed;
+                        }
+                        VirtualKeyCode::S => {
+                            self.controls.s_pressed = pressed;
+                        }
+                        VirtualKeyCode::D => {
+                            self.controls.d_pressed = pressed;
+                        }
+                        VirtualKeyCode::NumpadAdd => {
+                            self.controls.plus_pressed = pressed;
+                        }
+                        VirtualKeyCode::NumpadSubtract => {
+                            self.controls.minus_pressed = pressed;
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+                true
+            }
+            _ => false
+        }
     }
 
-    pub fn update(&mut self) {
+    // this is for fun, may delete later
+    fn move_blocks_random(&mut self) {
         // places blocks in random spots on the grid
         let mut rng = rand::thread_rng();
 
@@ -609,6 +745,35 @@ impl State {
         self.queue.write_buffer(&self.model_uniform_set.buffer,
                                 0,
                                 bytemuck::cast_slice(self.model_uniform_set.the_data.model.as_slice()));
+    }
+
+    pub fn update(&mut self) {
+        const CAM_SPEED: f32 = 20.0;
+        const CAM_ZOOM_STEP: f32 = 0.03;
+
+        // TODO: implement zoom w + and - keys.
+
+        //move camera
+        if self.controls.w_pressed {
+            self.camera.position += Vector2::new(0.0, CAM_SPEED);
+        }
+        if self.controls.a_pressed {
+            self.camera.position += Vector2::new(CAM_SPEED, 0.0);
+        }
+        if self.controls.s_pressed {
+            self.camera.position += Vector2::new(0.0, -CAM_SPEED);
+        }
+        if self.controls.d_pressed {
+            self.camera.position += Vector2::new(-CAM_SPEED, 0.0);
+        }
+        if self.controls.plus_pressed {
+            self.camera.zoom_amount -= CAM_ZOOM_STEP;
+        }
+        if self.controls.minus_pressed {
+            self.camera.zoom_amount += CAM_ZOOM_STEP;
+        }
+
+        self.camera.update_buffer(&self.queue);
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -642,7 +807,7 @@ impl State {
                 depth_stencil_attachment: None,
             });
             render_pass.set_pipeline(&self.render_pipeline); // 2.
-            render_pass.set_bind_group(0, &self.camera_uniform_set.bind_group, &[]);
+            render_pass.set_bind_group(0, &self.camera.bind_group.bind_group, &[]);
             render_pass.set_bind_group(1, &self.model_uniform_set.bind_group, &[]);
             render_pass.set_bind_group(2, &self.color_uniform_set.bind_group, &[]);
             render_pass.set_bind_group(3, &self.diffuse_bind_group, &[]); // NEW!

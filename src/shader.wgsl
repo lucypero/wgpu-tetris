@@ -49,5 +49,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var the_sample = textureSample(t_diffuse, s_diffuse, in.tex_coords);
     var the_tint = color_buf.color[in.inst_index];
 
-    return normalize(the_sample * the_tint);
+    return the_sample * the_tint;
 }

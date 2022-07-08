@@ -3,6 +3,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::{WindowBuilder, Window},
 };
+use winit::window::Fullscreen::Borderless;
 
 use wgpu_tetris;
 
@@ -22,6 +23,7 @@ pub async fn run() {
     let window = WindowBuilder::new()
         .with_title("wgpu-tetris")
         .with_inner_size(inner_size)
+        // .with_fullscreen(Some(Borderless(None)))
         .build(&event_loop).unwrap();
 
     let mut state = wgpu_tetris::State::new(&window).await;
@@ -54,11 +56,7 @@ pub async fn run() {
             }
         }
         Event::RedrawRequested(window_id) if window_id == window.id() => {
-            if frames == (60 / 5) {
-                state.update();
-                frames = 0;
-            }
-            frames += 1;
+            state.update();
             match state.render() {
                 Ok(_) => {}
                 // Reconfigure the surface if lost
