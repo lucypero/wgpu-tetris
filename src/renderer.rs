@@ -7,13 +7,13 @@ use cgmath::prelude::*;
 use cgmath::{Matrix4, Vector2, Vector3};
 use rand::Rng;
 use winit::event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent};
-
+use crate::{Game, game};
 
 pub const WINDOW_INNER_WIDTH: u32 = 1000;
 pub const WINDOW_INNER_HEIGHT: u32 = 600;
-const BLOCK_SIZE: f32 = 20.0;
-const BLOCK_COUNT: usize = 10240;
-const BLOCK_GAP: f32 = 0.0;
+// Fixed number of block instances in the instance renderer
+//  In the game, there will always be less than this.
+const BLOCK_COUNT: usize = 1024;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -65,7 +65,6 @@ struct Camera {
 }
 
 impl Camera {
-
     // do not use this
     fn change_zoom(&mut self, new_zoom: f32) {
         // let mut new_mat: Matrix4<f32> = Matrix4::from(self.camera.bind_group.the_data.view_proj.0);
@@ -137,7 +136,6 @@ impl CameraUniform {
 }
 
 struct ModelUniform {
-    //TODO: this stack overflows if there are 1024 blocks. haha.
     model: Vec<Mat4>,
 }
 
@@ -150,16 +148,10 @@ impl ModelUniform {
         for _ in 0..BLOCK_COUNT {
             let model: [[f32; 4]; 4] = cgmath::Matrix4::from_translation(
                 Vector3 {
-                    x: (BLOCK_SIZE + BLOCK_GAP) * i_x as f32,
-                    y: (BLOCK_SIZE + BLOCK_GAP) * y as f32,
+                    x: -game::BLOCK_SIZE,
+                    y: -game::BLOCK_SIZE,
                     z: 0.0,
                 }).into();
-            i_x += 1;
-            if i_x as f32 * BLOCK_SIZE > size.width as f32 {
-                i_x = 0;
-                y += 1;
-            }
-
             model_vec.push(model.into());
         }
 
@@ -175,14 +167,13 @@ struct ColorUniform {
 
 impl ColorUniform {
     fn new() -> Self {
-        let mut rng = rand::thread_rng();
         let mut color_vec = Vec::with_capacity(BLOCK_COUNT);
 
         for i in 0..BLOCK_COUNT {
             let color: Vec4 = cgmath::Vector4 {
-                x: rng.gen_range(0.0..=1.0),
-                y: rng.gen_range(0.0..=1.0),
-                z: rng.gen_range(0.0..=1.0),
+                x: 1.0,
+                y: 1.0,
+                z: 1.0,
                 w: 1.0,
             }.into();
             color_vec.push(color);
@@ -239,9 +230,9 @@ const VERTICES: &[Vertex] = &[
     (2)-----(3)
      */
     Vertex { position: [0.0, 0.0, 0.0], tex_coords: [0.0, 0.0] },
-    Vertex { position: [BLOCK_SIZE, 0.0, 0.0], tex_coords: [1.0, 0.0] },
-    Vertex { position: [0.0, BLOCK_SIZE, 0.0], tex_coords: [0.0, 1.0] },
-    Vertex { position: [BLOCK_SIZE, BLOCK_SIZE, 0.0], tex_coords: [1.0, 1.0] },
+    Vertex { position: [game::BLOCK_SIZE, 0.0, 0.0], tex_coords: [1.0, 0.0] },
+    Vertex { position: [0.0, game::BLOCK_SIZE, 0.0], tex_coords: [0.0, 1.0] },
+    Vertex { position: [game::BLOCK_SIZE, game::BLOCK_SIZE, 0.0], tex_coords: [1.0, 1.0] },
 ];
 
 const INDICES: &[u16] = &[
@@ -249,29 +240,8 @@ const INDICES: &[u16] = &[
     2, 3, 1
 ];
 
-struct Controls {
-    w_pressed: bool,
-    a_pressed: bool,
-    s_pressed: bool,
-    d_pressed: bool,
-    plus_pressed: bool,
-    minus_pressed: bool,
-}
 
-impl Controls {
-    fn new() -> Self {
-        Self {
-            w_pressed: false,
-            a_pressed: false,
-            s_pressed: false,
-            d_pressed: false,
-            plus_pressed: false,
-            minus_pressed: false,
-        }
-    }
-}
-
-pub struct State {
+pub struct Renderer {
     surface: wgpu::Surface,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -285,13 +255,11 @@ pub struct State {
     model_uniform_set: BindGroupSetThing<ModelUniform>,
     color_uniform_set: BindGroupSetThing<ColorUniform>,
     diffuse_bind_group: wgpu::BindGroup,
-    controls: Controls,
 }
 
-impl State {
-    pub async fn new(window: &winit::window::Window) -> Self {
+impl Renderer {
+    pub async fn new(window: &winit::window::Window, game: &Game) -> Self {
         let size = window.inner_size();
-        println!("Kots on the screen (approx): {}", (size.width as f32 / BLOCK_SIZE) * (size.height as f32 / BLOCK_SIZE));
 
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
@@ -330,7 +298,6 @@ impl State {
         surface.configure(&device, &config);
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
-
 
         let vertex_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -403,6 +370,8 @@ impl State {
         // we need a model matrix and color
 
         // model matrix : we need to create the buffer and the bind group
+        // this is the instance data for the tetris blocks
+
         let model_uniform = ModelUniform::new(size);
 
         let model_buffer = device.create_buffer_init(
@@ -449,6 +418,7 @@ impl State {
         };
 
         // color uniform
+        // cute colors for all the bloccs
         let color_uniform = ColorUniform::new();
 
         let color_buffer = device.create_buffer_init(
@@ -495,11 +465,9 @@ impl State {
         };
 
         // the texture
-
         let diffuse_bytes = include_bytes!("block.png");
         let diffuse_image = image::load_from_memory(diffuse_bytes).unwrap();
         let diffuse_rgba = diffuse_image.to_rgba8();
-        println!("{diffuse_rgba:?}");
 
         use image::GenericImageView;
         let dimensions = diffuse_image.dimensions();
@@ -623,7 +591,6 @@ impl State {
             camera,
             color_uniform_set,
             diffuse_bind_group,
-            controls: Controls::new(),
         }
     }
 
@@ -673,111 +640,39 @@ impl State {
         }
     }
 
-    pub fn input(&mut self, event: &winit::event::WindowEvent) -> bool {
+    pub fn render(&mut self, game: &Game) -> Result<(), wgpu::SurfaceError> {
 
-        // matches!(event, WindowEvent::KeyboardInput {})
+        // update all the buffers
+        {
+            //update 0..block len model uniforms
+            for i in self.model_uniform_set.the_data.model.iter_mut().take(game.blocks.len()).enumerate() {
+                let block = &game.blocks[i.0];
 
-        match event {
-            WindowEvent::KeyboardInput {
-                input: KeyboardInput {
-                    state,
-                    virtual_keycode,
-                    ..
-                },
-                ..
-            } => {
-                let pressed = match state {
-                    ElementState::Pressed => true,
-                    ElementState::Released => false,
-                };
-
-                match virtual_keycode {
-                    Some(vk) => match vk {
-                        VirtualKeyCode::W => {
-                            self.controls.w_pressed = pressed;
-                        }
-                        VirtualKeyCode::A => {
-                            self.controls.a_pressed = pressed;
-                        }
-                        VirtualKeyCode::S => {
-                            self.controls.s_pressed = pressed;
-                        }
-                        VirtualKeyCode::D => {
-                            self.controls.d_pressed = pressed;
-                        }
-                        VirtualKeyCode::NumpadAdd => {
-                            self.controls.plus_pressed = pressed;
-                        }
-                        VirtualKeyCode::NumpadSubtract => {
-                            self.controls.minus_pressed = pressed;
-                        }
-                        _ => {}
-                    },
-                    _ => {}
-                }
-                true
+                let new_mat = Matrix4::from_translation(Vector3 {
+                    x: game.grid_pos.x + game::BLOCK_SIZE * block.pos.x as f32,
+                    y: game.grid_pos.y - game::BLOCK_SIZE * block.pos.y as f32,
+                    z: 0.0,
+                });
+                i.1.0 = new_mat.into();
             }
-            _ => false
-        }
-    }
 
-    // this is for fun, may delete later
-    fn move_blocks_random(&mut self) {
-        // places blocks in random spots on the grid
-        let mut rng = rand::thread_rng();
+            self.queue.write_buffer(&self.model_uniform_set.buffer,
+                                    0,
+                                    bytemuck::cast_slice(self.model_uniform_set.the_data.model.as_slice()));
 
-        for i in &mut self.model_uniform_set.the_data.model {
-            let new_mat = Matrix4::from_translation(Vector3 {
-                x: BLOCK_SIZE * rng.gen_range(0..(WINDOW_INNER_WIDTH as f32 / BLOCK_SIZE) as u32) as f32,
-                y: BLOCK_SIZE * rng.gen_range(0..(WINDOW_INNER_HEIGHT as f32 / BLOCK_SIZE) as u32) as f32,
-                z: 0.0,
-            });
-            i.0 = new_mat.into();
-        }
+            //update 0..block len color uniform
 
-        self.queue.write_buffer(&self.model_uniform_set.buffer,
-                                0,
-                                bytemuck::cast_slice(self.model_uniform_set.the_data.model.as_slice()));
-    }
-
-    pub fn update(&mut self) {
-        const CAM_SPEED: f32 = 20.0;
-        const CAM_ZOOM_STEP: f32 = 0.03;
-        const CAM_ZOOM_MIN: f32 = 0.13;
-        const CAM_ZOOM_MAX: f32 = 4.0;
-
-        // TODO: implement zoom w + and - keys.
-
-        //move camera
-        if self.controls.w_pressed {
-            self.camera.position += Vector2::new(0.0, CAM_SPEED);
-        }
-        if self.controls.a_pressed {
-            self.camera.position += Vector2::new(CAM_SPEED, 0.0);
-        }
-        if self.controls.s_pressed {
-            self.camera.position += Vector2::new(0.0, -CAM_SPEED);
-        }
-        if self.controls.d_pressed {
-            self.camera.position += Vector2::new(-CAM_SPEED, 0.0);
-        }
-        if self.controls.plus_pressed {
-            self.camera.zoom_amount -= CAM_ZOOM_STEP;
-            if self.camera.zoom_amount <= CAM_ZOOM_MIN {
-                self.camera.zoom_amount = CAM_ZOOM_MIN;
+            for i in self.color_uniform_set.the_data.color.iter_mut().take(game.blocks.len()).enumerate() {
+                let block = &game.blocks[i.0];
+                i.1.0 = block.color.into();
             }
-        }
-        if self.controls.minus_pressed {
-            self.camera.zoom_amount += CAM_ZOOM_STEP;
-            if self.camera.zoom_amount >= CAM_ZOOM_MAX {
-                self.camera.zoom_amount = CAM_ZOOM_MAX;
-            }
+
+            self.queue.write_buffer(&self.color_uniform_set.buffer,
+                                    0,
+                                    bytemuck::cast_slice(self.color_uniform_set.the_data.color.as_slice()));
         }
 
-        self.camera.update_buffer(&self.queue);
-    }
-
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        // do the render
         let output = self.surface.get_current_texture()?;
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -814,7 +709,7 @@ impl State {
             render_pass.set_bind_group(3, &self.diffuse_bind_group, &[]); // NEW!
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); // 1.
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..BLOCK_COUNT as _); // 2.
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..game.blocks.len() as _); // 2.
         }
 
         // submit will accept anything that implements IntoIter

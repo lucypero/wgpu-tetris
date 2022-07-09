@@ -1,4 +1,6 @@
 mod game;
+mod renderer;
+mod input;
 
 use winit::{
     event::*,
@@ -6,9 +8,12 @@ use winit::{
     window::{WindowBuilder, Window},
 };
 use winit::window::Fullscreen::Borderless;
+use crate::renderer::Renderer;
+use crate::game::Game;
+use crate::input::Input;
 
 fn main() {
-    pollster::block_on(wgpu_tetris::run());
+    pollster::block_on(run());
 }
 
 pub async fn run() {
@@ -16,8 +21,8 @@ pub async fn run() {
     let event_loop = EventLoop::new();
 
     let inner_size = winit::dpi::PhysicalSize{
-        width: wgpu_tetris::WINDOW_INNER_WIDTH,
-        height: wgpu_tetris::WINDOW_INNER_HEIGHT,
+        width: renderer::WINDOW_INNER_WIDTH,
+        height: renderer::WINDOW_INNER_HEIGHT,
     };
 
     let window = WindowBuilder::new()
@@ -26,7 +31,9 @@ pub async fn run() {
         // .with_fullscreen(Some(Borderless(None)))
         .build(&event_loop).unwrap();
 
-    let mut state = wgpu_tetris::State::new(&window).await;
+    let mut input = Input::new();
+    let mut game = Game::new();
+    let mut renderer = Renderer::new(&window, &game).await;
 
     let mut frames: u64 = 0;
 
@@ -34,33 +41,30 @@ pub async fn run() {
         Event::WindowEvent {
             ref event,
             window_id,
-        } if window_id == window.id() => if !state.input(event) {
+        } if window_id == window.id() => {
             match event {
-                WindowEvent::CloseRequested
-                | WindowEvent::KeyboardInput {
-                    input:
-                    KeyboardInput {
-                        state: ElementState::Pressed,
-                        virtual_keycode: Some(VirtualKeyCode::Escape),
-                        ..
-                    },
+                WindowEvent::KeyboardInput {
+                    input: kb_input,
                     ..
-                } => *control_flow = ControlFlow::Exit,
+                } => {
+                    input.process_key_event(kb_input);
+                }
                 WindowEvent::Resized(physical_size) => {
-                    state.resize(*physical_size);
+                    renderer.resize(*physical_size);
                 }
                 WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                    state.resize(**new_inner_size);
+                    renderer.resize(**new_inner_size);
                 }
                 _ => {}
             }
         }
         Event::RedrawRequested(window_id) if window_id == window.id() => {
-            state.update();
-            match state.render() {
+            game.update(&input);
+            input.save_snapshot();
+            match renderer.render(&game) {
                 Ok(_) => {}
                 // Reconfigure the surface if lost
-                Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
+                Err(wgpu::SurfaceError::Lost) => renderer.resize(renderer.size),
                 // The system is out of memory, we should probably quit
                 Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
                 // All other errors (Outdated, Timeout) should be resolved by the next frame
