@@ -1,3 +1,5 @@
+mod game;
+
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
@@ -5,10 +7,8 @@ use winit::{
 };
 use winit::window::Fullscreen::Borderless;
 
-use wgpu_tetris;
-
 fn main() {
-    pollster::block_on(run());
+    pollster::block_on(wgpu_tetris::run());
 }
 
 pub async fn run() {
