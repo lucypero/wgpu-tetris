@@ -103,4 +103,10 @@ impl Input {
         let ind = key_to_index(key);
         self.keys[ind] && !self.keys_prev_frame[ind]
     }
+
+    //returns true on the first frame that the key is up
+    pub fn get_key_up(&self, key: Keys) -> bool {
+        let ind = key_to_index(key);
+        !self.keys[ind] && self.keys_prev_frame[ind]
+    }
 }

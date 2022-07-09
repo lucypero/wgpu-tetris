@@ -86,6 +86,7 @@ impl Game {
             if input.get_key_down(Keys::D) {
                 i.pos.x += 1;
             }
+
         }
     }
 }
