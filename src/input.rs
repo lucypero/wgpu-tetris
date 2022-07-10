@@ -8,6 +8,11 @@ pub enum Keys {
     A,
     S,
     D,
+    H,
+    J,
+    K,
+    U,
+    Space,
     Plus,
     Minus,
     Right,
@@ -22,12 +27,17 @@ fn key_to_index(key: Keys) -> usize {
         Keys::A => 1,
         Keys::S => 2,
         Keys::D => 3,
-        Keys::Plus => 4,
-        Keys::Minus => 5,
-        Keys::Right => 6,
-        Keys::Left => 7,
-        Keys::Up => 8,
-        Keys::Down => 9,
+        Keys::H => 4,
+        Keys::J => 5,
+        Keys::K => 6,
+        Keys::U => 7,
+        Keys::Space => 8,
+        Keys::Plus => 9,
+        Keys::Minus => 10,
+        Keys::Right => 11,
+        Keys::Left => 12,
+        Keys::Up => 13,
+        Keys::Down => 14,
     }
 }
 
@@ -82,6 +92,21 @@ impl Input {
                 }
                 VirtualKeyCode::Right => {
                     self.keys[key_to_index(Keys::Right)] = pressed;
+                }
+                VirtualKeyCode::H => {
+                    self.keys[key_to_index(Keys::H)] = pressed;
+                }
+                VirtualKeyCode::J => {
+                    self.keys[key_to_index(Keys::J)] = pressed;
+                }
+                VirtualKeyCode::K => {
+                    self.keys[key_to_index(Keys::K)] = pressed;
+                }
+                VirtualKeyCode::U => {
+                    self.keys[key_to_index(Keys::U)] = pressed;
+                }
+                VirtualKeyCode::Space => {
+                    self.keys[key_to_index(Keys::Space)] = pressed;
                 }
                 _ => {}
             }

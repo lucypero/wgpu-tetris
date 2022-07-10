@@ -11,6 +11,7 @@ use winit::window::Fullscreen::Borderless;
 use crate::renderer::Renderer;
 use crate::game::Game;
 use crate::input::Input;
+use std::time::{Duration, Instant};
 
 fn main() {
     pollster::block_on(run());
@@ -36,6 +37,7 @@ pub async fn run() {
     let mut renderer = Renderer::new(&window, &game).await;
 
     let mut frames: u64 = 0;
+    let mut now = Instant::now();
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
@@ -43,6 +45,9 @@ pub async fn run() {
             window_id,
         } if window_id == window.id() => {
             match event {
+                WindowEvent::CloseRequested => {
+                    *control_flow = ControlFlow::Exit;
+                }
                 WindowEvent::KeyboardInput {
                     input: kb_input,
                     ..
@@ -59,7 +64,8 @@ pub async fn run() {
             }
         }
         Event::RedrawRequested(window_id) if window_id == window.id() => {
-            game.update(&input);
+            game.update(&input, now.elapsed());
+            now = Instant::now();
             input.save_snapshot();
             match renderer.render(&game) {
                 Ok(_) => {}

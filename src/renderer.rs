@@ -645,8 +645,10 @@ impl Renderer {
         // update all the buffers
         {
             //update 0..block len model uniforms
-            for i in self.model_uniform_set.the_data.model.iter_mut().take(game.blocks.len()).enumerate() {
-                let block = &game.blocks[i.0];
+            for i in self.model_uniform_set.the_data.model.iter_mut()
+                .take(game.fixed_blocks.len())
+                .enumerate() {
+                let block = &game.fixed_blocks[i.0];
 
                 let new_mat = Matrix4::from_translation(Vector3 {
                     x: game.grid_pos.x + game::BLOCK_SIZE * block.pos.x as f32,
@@ -656,15 +658,58 @@ impl Renderer {
                 i.1.0 = new_mat.into();
             }
 
+            // update active blocks uniforms
+            if let Some(ref act_block) = game.active_block_set {
+                for i in self.model_uniform_set.the_data.model.iter_mut()
+                    .skip(game.fixed_blocks.len())
+                    .take(act_block.positions.len())
+                    .enumerate() {
+
+                    let the_pos_x = i.0 % act_block.pos_w;
+                    let the_pos_y = i.0 / act_block.pos_w;
+
+                    let new_mat = if act_block.positions[i.0] {
+                        Matrix4::from_translation(Vector3 {
+                            x: game.grid_pos.x
+                                + game::BLOCK_SIZE
+                                * (act_block.pos.x as f32 + the_pos_x as f32),
+                            y: game.grid_pos.y
+                                - game::BLOCK_SIZE
+                                * (act_block.pos.y as f32 + the_pos_y as f32),
+                            z: 0.0,
+                        })
+                    } else {
+                        Matrix4::from_translation(Vector3 {
+                            x: - game::BLOCK_SIZE,
+                            y: 0.0,
+                            z: 0.0,
+                        })
+                    };
+
+                    i.1.0 = new_mat.into();
+                }
+            }
+
+
             self.queue.write_buffer(&self.model_uniform_set.buffer,
                                     0,
                                     bytemuck::cast_slice(self.model_uniform_set.the_data.model.as_slice()));
 
             //update 0..block len color uniform
-
-            for i in self.color_uniform_set.the_data.color.iter_mut().take(game.blocks.len()).enumerate() {
-                let block = &game.blocks[i.0];
+            for i in self.color_uniform_set.the_data.color.iter_mut()
+                .take(game.fixed_blocks.len())
+                .enumerate() {
+                let block = &game.fixed_blocks[i.0];
                 i.1.0 = block.color.into();
+            }
+
+            // active block set color
+            if let Some(ref act_block) = game.active_block_set {
+                for i in self.color_uniform_set.the_data.color.iter_mut()
+                    .skip(game.fixed_blocks.len())
+                    .take(act_block.positions.len()) {
+                    i.0 = act_block.color.into();
+                }
             }
 
             self.queue.write_buffer(&self.color_uniform_set.buffer,
@@ -709,7 +754,17 @@ impl Renderer {
             render_pass.set_bind_group(3, &self.diffuse_bind_group, &[]); // NEW!
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); // 1.
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..game.blocks.len() as _); // 2.
+
+            let instance_count = match game.active_block_set {
+                Some(ref b) => {
+                    game.fixed_blocks.len() + b.positions.len()
+                }
+                None => {
+                    game.fixed_blocks.len()
+                }
+            };
+
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..instance_count as _); // 2.
         }
 
         // submit will accept anything that implements IntoIter
