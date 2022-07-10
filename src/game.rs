@@ -24,7 +24,10 @@ mod color {
     pub const GREEN: Vec4 = Vec4::new(0.0, 1.0, 0.0, 1.0);
     pub const PINK: Vec4 = Vec4::new(1., 0.541, 0.909, 1.0);
     pub const YELLOW: Vec4 = Vec4::new(1., 0.968, 0.541, 1.0);
-    pub const COLORS: [Vec4; 4] = [RED, GREEN, PINK, YELLOW];
+    pub const COLOR_1: Vec4 = Vec4::new(0.466, 0.882, 0.996, 1.0);
+    pub const COLOR_2: Vec4 = Vec4::new(0.815, 0.121, 1., 1.0);
+    pub const COLOR_3: Vec4 = Vec4::new(0.039, 1., 0.647, 1.0);
+    pub const COLORS: [Vec4; 7] = [RED, GREEN, PINK, YELLOW, COLOR_1, COLOR_2, COLOR_3];
 }
 
 pub struct Block {
@@ -34,10 +37,8 @@ pub struct Block {
 
 pub struct BlockSet {
     pub positions: Vec<bool>,
-    // height should be the same. all the block sets are square matrices.
     pub pos_w: usize,
-    //pos of bottom left block
-    pub pos: Pos,
+    pub pos: Pos, //pos of bottom left block
     pub color: Vec4,
 }
 
@@ -54,7 +55,7 @@ impl BlockSet {
             positions,
             pos: Pos::new(5, 20),
             pos_w: 3,
-            color: color::PINK,
+            color: color::COLORS[0],
         }
     }
 
@@ -68,7 +69,7 @@ impl BlockSet {
             positions,
             pos: Pos::new(5, 20),
             pos_w: 2,
-            color: color::RED,
+            color: color::COLORS[1],
         }
     }
 
@@ -84,7 +85,7 @@ impl BlockSet {
             positions,
             pos: Pos::new(5, 20),
             pos_w: 4,
-            color: color::PINK,
+            color: color::COLORS[2],
         }
     }
 
@@ -99,7 +100,7 @@ impl BlockSet {
             positions,
             pos: Pos::new(5, 20),
             pos_w: 3,
-            color: color::PINK,
+            color: color::COLORS[3],
         }
     }
 
@@ -114,7 +115,7 @@ impl BlockSet {
             positions,
             pos: Pos::new(5, 20),
             pos_w: 3,
-            color: color::PINK,
+            color: color::COLORS[4],
         }
     }
 
@@ -129,7 +130,7 @@ impl BlockSet {
             positions,
             pos: Pos::new(5, 20),
             pos_w: 3,
-            color: color::PINK,
+            color: color::COLORS[5],
         }
     }
 
@@ -144,7 +145,7 @@ impl BlockSet {
             positions,
             pos: Pos::new(5, 20),
             pos_w: 3,
-            color: color::PINK,
+            color: color::COLORS[6],
         }
     }
 
