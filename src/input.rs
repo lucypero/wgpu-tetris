@@ -109,7 +109,7 @@ impl Input {
                     self.keys[key_to_index(Keys::Space)] = pressed;
                 }
                 _ => {}
-            }
+            },
             _ => {}
         }
     }

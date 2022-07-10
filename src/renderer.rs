@@ -1,13 +1,13 @@
 extern crate core;
 
-use std::mem;
-use std::mem::MaybeUninit;
-use wgpu::util::{BufferInitDescriptor, DeviceExt};
+use crate::{game, Game};
 use cgmath::prelude::*;
 use cgmath::{Matrix4, Vector2, Vector3};
 use rand::Rng;
+use std::mem;
+use std::mem::MaybeUninit;
+use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use winit::event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent};
-use crate::{Game, game};
 
 pub const WINDOW_INNER_WIDTH: u32 = 1000;
 pub const WINDOW_INNER_HEIGHT: u32 = 600;
@@ -72,7 +72,14 @@ impl Camera {
         // self.camera.bind_group.the_data.view_proj = Mat4::from(new_mat);
 
         let view_proj: [[f32; 4]; 4] = {
-            let proj = cgmath::ortho(0.0, self.initial_size.x * new_zoom, self.initial_size.y * new_zoom, 0.0, -1.0, 1.0);
+            let proj = cgmath::ortho(
+                0.0,
+                self.initial_size.x * new_zoom,
+                self.initial_size.y * new_zoom,
+                0.0,
+                -1.0,
+                1.0,
+            );
             (OPENGL_TO_WGPU_MATRIX * proj).into()
         };
 
@@ -88,7 +95,6 @@ impl Camera {
     }
 
     fn update_buffer(&mut self, queue: &wgpu::Queue) {
-
         // write new matrix in the uniform
 
         // transformation
@@ -146,18 +152,16 @@ impl ModelUniform {
         let mut model_vec: Vec<Mat4> = Vec::with_capacity(BLOCK_COUNT);
 
         for _ in 0..BLOCK_COUNT {
-            let model: [[f32; 4]; 4] = cgmath::Matrix4::from_translation(
-                Vector3 {
-                    x: -game::BLOCK_SIZE,
-                    y: -game::BLOCK_SIZE,
-                    z: 0.0,
-                }).into();
+            let model: [[f32; 4]; 4] = cgmath::Matrix4::from_translation(Vector3 {
+                x: -game::BLOCK_SIZE,
+                y: -game::BLOCK_SIZE,
+                z: 0.0,
+            })
+            .into();
             model_vec.push(model.into());
         }
 
-        Self {
-            model: model_vec
-        }
+        Self { model: model_vec }
     }
 }
 
@@ -175,13 +179,12 @@ impl ColorUniform {
                 y: 1.0,
                 z: 1.0,
                 w: 1.0,
-            }.into();
+            }
+            .into();
             color_vec.push(color);
         }
 
-        Self {
-            color: color_vec
-        }
+        Self { color: color_vec }
     }
 }
 
@@ -229,17 +232,25 @@ const VERTICES: &[Vertex] = &[
      |       |
     (2)-----(3)
      */
-    Vertex { position: [0.0, 0.0, 0.0], tex_coords: [0.0, 0.0] },
-    Vertex { position: [game::BLOCK_SIZE, 0.0, 0.0], tex_coords: [1.0, 0.0] },
-    Vertex { position: [0.0, game::BLOCK_SIZE, 0.0], tex_coords: [0.0, 1.0] },
-    Vertex { position: [game::BLOCK_SIZE, game::BLOCK_SIZE, 0.0], tex_coords: [1.0, 1.0] },
+    Vertex {
+        position: [0.0, 0.0, 0.0],
+        tex_coords: [0.0, 0.0],
+    },
+    Vertex {
+        position: [game::BLOCK_SIZE, 0.0, 0.0],
+        tex_coords: [1.0, 0.0],
+    },
+    Vertex {
+        position: [0.0, game::BLOCK_SIZE, 0.0],
+        tex_coords: [0.0, 1.0],
+    },
+    Vertex {
+        position: [game::BLOCK_SIZE, game::BLOCK_SIZE, 0.0],
+        tex_coords: [1.0, 1.0],
+    },
 ];
 
-const INDICES: &[u16] = &[
-    1, 0, 2,
-    2, 3, 1
-];
-
+const INDICES: &[u16] = &[1, 0, 2, 2, 3, 1];
 
 pub struct Renderer {
     surface: wgpu::Surface,
@@ -267,26 +278,30 @@ impl Renderer {
         //println!("{:?}",instance.generate_report());
 
         let surface = unsafe { instance.create_surface(window) };
-        let adapter = instance.request_adapter(
-            &wgpu::RequestAdapterOptions {
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
-            }
-        ).await.unwrap();
+            })
+            .await
+            .unwrap();
 
-        let (device, queue) = adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                features: wgpu::Features::empty(),
-                limits: if cfg!(target_arch = "wasm)") {
-                    wgpu::Limits::downlevel_webgl2_defaults()
-                } else {
-                    wgpu::Limits::default()
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    features: wgpu::Features::empty(),
+                    limits: if cfg!(target_arch = "wasm)") {
+                        wgpu::Limits::downlevel_webgl2_defaults()
+                    } else {
+                        wgpu::Limits::default()
+                    },
+                    label: None,
                 },
-                label: None,
-            },
-            None,
-        ).await.unwrap();
+                None,
+            )
+            .await
+            .unwrap();
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -299,38 +314,33 @@ impl Renderer {
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
-        let vertex_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(VERTICES),
-                usage: wgpu::BufferUsages::VERTEX,
-            }
-        );
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            contents: bytemuck::cast_slice(VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
 
-        let index_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Index Buffer"),
-                contents: bytemuck::cast_slice(INDICES),
-                usage: wgpu::BufferUsages::INDEX,
-            }
-        );
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Index Buffer"),
+            contents: bytemuck::cast_slice(INDICES),
+            usage: wgpu::BufferUsages::INDEX,
+        });
 
         let num_indices = INDICES.len() as u32;
 
         // -- bind descriptors --
 
         // we need an ortho camera
-        let camera_uniform = CameraUniform::new(Vector2::new(size.width as f32, size.height as f32));
-        let camera_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Camera Buffer"),
-                contents: bytemuck::cast_slice(&[camera_uniform]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            }
-        );
-        let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
+        let camera_uniform =
+            CameraUniform::new(Vector2::new(size.width as f32, size.height as f32));
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Camera Buffer"),
+            contents: bytemuck::cast_slice(&[camera_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
@@ -339,18 +349,15 @@ impl Renderer {
                         min_binding_size: None,
                     },
                     count: None,
-                }
-            ],
-            label: Some("camera_bind_group_layout"),
-        });
+                }],
+                label: Some("camera_bind_group_layout"),
+            });
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &camera_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera_buffer.as_entire_binding(),
-                }
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
             label: Some("camera_bind_group"),
         });
 
@@ -374,40 +381,33 @@ impl Renderer {
 
         let model_uniform = ModelUniform::new(size);
 
-        let model_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("model matrix buffer"),
-                contents: bytemuck::cast_slice(model_uniform.model.as_slice()),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            }
-        );
+        let model_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("model matrix buffer"),
+            contents: bytemuck::cast_slice(model_uniform.model.as_slice()),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
 
-        let model_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
+        let model_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage {
-                            read_only: true
-                        },
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
                     count: None,
-                }
-            ],
-            label: Some("model_bind_group_layout"),
-        });
+                }],
+                label: Some("model_bind_group_layout"),
+            });
 
         let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &model_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: model_buffer.as_entire_binding(),
-                }
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: model_buffer.as_entire_binding(),
+            }],
             label: Some("model_bind_group"),
         });
 
@@ -421,40 +421,33 @@ impl Renderer {
         // cute colors for all the bloccs
         let color_uniform = ColorUniform::new();
 
-        let color_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("color buffer"),
-                contents: bytemuck::cast_slice(color_uniform.color.as_slice()),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            }
-        );
+        let color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("color buffer"),
+            contents: bytemuck::cast_slice(color_uniform.color.as_slice()),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
 
-        let color_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
+        let color_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage {
-                            read_only: true
-                        },
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
                     count: None,
-                }
-            ],
-            label: Some("color_bind_group_layout"),
-        });
+                }],
+                label: Some("color_bind_group_layout"),
+            });
 
         let color_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &color_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: color_buffer.as_entire_binding(),
-                }
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: color_buffer.as_entire_binding(),
+            }],
             label: Some("model_bind_group"),
         });
 
@@ -477,17 +470,15 @@ impl Renderer {
             height: dimensions.1,
             depth_or_array_layers: 1,
         };
-        let diffuse_texture = device.create_texture(
-            &wgpu::TextureDescriptor {
-                size: texture_size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                label: Some("diffuse_texture"),
-            }
-        );
+        let diffuse_texture = device.create_texture(&wgpu::TextureDescriptor {
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            label: Some("diffuse_texture"),
+        });
 
         queue.write_texture(
             wgpu::ImageCopyTexture {
@@ -507,7 +498,8 @@ impl Renderer {
 
         // We don't need to configure the texture view much, so let's
         // let wgpu define it.
-        let diffuse_texture_view = diffuse_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let diffuse_texture_view =
+            diffuse_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let diffuse_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -543,22 +535,20 @@ impl Renderer {
                 label: Some("texture_bind_group_layout"),
             });
 
-        let diffuse_bind_group = device.create_bind_group(
-            &wgpu::BindGroupDescriptor {
-                layout: &texture_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
-                    }
-                ],
-                label: Some("diffuse_bind_group"),
-            }
-        );
+        let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
+                },
+            ],
+            label: Some("diffuse_bind_group"),
+        });
 
         // -- bind group end --
 
@@ -566,7 +556,8 @@ impl Renderer {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[ // THE ORDER HERE MATTERS !!!!
+                bind_group_layouts: &[
+                    // THE ORDER HERE MATTERS !!!!
                     &camera_bind_group_layout,
                     &model_bind_group_layout,
                     &color_bind_group_layout,
@@ -575,7 +566,8 @@ impl Renderer {
                 push_constant_ranges: &[],
             });
 
-        let render_pipeline = Self::create_pipeline(&device, &config, &shader, &render_pipeline_layout);
+        let render_pipeline =
+            Self::create_pipeline(&device, &config, &shader, &render_pipeline_layout);
 
         Self {
             surface,
@@ -594,7 +586,12 @@ impl Renderer {
         }
     }
 
-    fn create_pipeline(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration, shader: &wgpu::ShaderModule, render_pipeline_layout: &wgpu::PipelineLayout) -> wgpu::RenderPipeline {
+    fn create_pipeline(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        shader: &wgpu::ShaderModule,
+        render_pipeline_layout: &wgpu::PipelineLayout,
+    ) -> wgpu::RenderPipeline {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
             layout: Some(&render_pipeline_layout),
@@ -641,13 +638,17 @@ impl Renderer {
     }
 
     pub fn render(&mut self, game: &Game) -> Result<(), wgpu::SurfaceError> {
-
         // update all the buffers
         {
             //update 0..block len model uniforms
-            for i in self.model_uniform_set.the_data.model.iter_mut()
+            for i in self
+                .model_uniform_set
+                .the_data
+                .model
+                .iter_mut()
                 .take(game.fixed_blocks.len())
-                .enumerate() {
+                .enumerate()
+            {
                 let block = &game.fixed_blocks[i.0];
 
                 let new_mat = Matrix4::from_translation(Vector3 {
@@ -655,74 +656,93 @@ impl Renderer {
                     y: game.grid_pos.y - game::BLOCK_SIZE * block.pos.y as f32,
                     z: 0.0,
                 });
-                i.1.0 = new_mat.into();
+                i.1 .0 = new_mat.into();
             }
 
             // update active blocks uniforms
             if let Some(ref act_block) = game.active_block_set {
-                for i in self.model_uniform_set.the_data.model.iter_mut()
+                for i in self
+                    .model_uniform_set
+                    .the_data
+                    .model
+                    .iter_mut()
                     .skip(game.fixed_blocks.len())
                     .take(act_block.positions.len())
-                    .enumerate() {
-
+                    .enumerate()
+                {
                     let the_pos_x = i.0 % act_block.pos_w;
                     let the_pos_y = i.0 / act_block.pos_w;
 
                     let new_mat = if act_block.positions[i.0] {
                         Matrix4::from_translation(Vector3 {
                             x: game.grid_pos.x
-                                + game::BLOCK_SIZE
-                                * (act_block.pos.x as f32 + the_pos_x as f32),
+                                + game::BLOCK_SIZE * (act_block.pos.x as f32 + the_pos_x as f32),
                             y: game.grid_pos.y
-                                - game::BLOCK_SIZE
-                                * (act_block.pos.y as f32 + the_pos_y as f32),
+                                - game::BLOCK_SIZE * (act_block.pos.y as f32 + the_pos_y as f32),
                             z: 0.0,
                         })
                     } else {
                         Matrix4::from_translation(Vector3 {
-                            x: - game::BLOCK_SIZE,
+                            x: -game::BLOCK_SIZE,
                             y: 0.0,
                             z: 0.0,
                         })
                     };
 
-                    i.1.0 = new_mat.into();
+                    i.1 .0 = new_mat.into();
                 }
             }
 
-
-            self.queue.write_buffer(&self.model_uniform_set.buffer,
-                                    0,
-                                    bytemuck::cast_slice(self.model_uniform_set.the_data.model.as_slice()));
+            self.queue.write_buffer(
+                &self.model_uniform_set.buffer,
+                0,
+                bytemuck::cast_slice(self.model_uniform_set.the_data.model.as_slice()),
+            );
 
             //update 0..block len color uniform
-            for i in self.color_uniform_set.the_data.color.iter_mut()
+            for i in self
+                .color_uniform_set
+                .the_data
+                .color
+                .iter_mut()
                 .take(game.fixed_blocks.len())
-                .enumerate() {
+                .enumerate()
+            {
                 let block = &game.fixed_blocks[i.0];
-                i.1.0 = block.color.into();
+                i.1 .0 = block.color.into();
             }
 
             // active block set color
             if let Some(ref act_block) = game.active_block_set {
-                for i in self.color_uniform_set.the_data.color.iter_mut()
+                for i in self
+                    .color_uniform_set
+                    .the_data
+                    .color
+                    .iter_mut()
                     .skip(game.fixed_blocks.len())
-                    .take(act_block.positions.len()) {
+                    .take(act_block.positions.len())
+                {
                     i.0 = act_block.color.into();
                 }
             }
 
-            self.queue.write_buffer(&self.color_uniform_set.buffer,
-                                    0,
-                                    bytemuck::cast_slice(self.color_uniform_set.the_data.color.as_slice()));
+            self.queue.write_buffer(
+                &self.color_uniform_set.buffer,
+                0,
+                bytemuck::cast_slice(self.color_uniform_set.the_data.color.as_slice()),
+            );
         }
 
         // do the render
         let output = self.surface.get_current_texture()?;
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Render Encoder"),
-        });
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -733,17 +753,15 @@ impl Renderer {
                         view: &view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(
-                                wgpu::Color {
-                                    r: 0.1,
-                                    g: 0.2,
-                                    b: 0.3,
-                                    a: 1.0,
-                                }
-                            ),
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.1,
+                                g: 0.2,
+                                b: 0.3,
+                                a: 1.0,
+                            }),
                             store: true,
                         },
-                    })
+                    }),
                 ],
                 depth_stencil_attachment: None,
             });
@@ -756,15 +774,12 @@ impl Renderer {
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); // 1.
 
             let instance_count = match game.active_block_set {
-                Some(ref b) => {
-                    game.fixed_blocks.len() + b.positions.len()
-                }
-                None => {
-                    game.fixed_blocks.len()
-                }
+                Some(ref b) => game.fixed_blocks.len() + b.positions.len(),
+                None => game.fixed_blocks.len(),
             };
 
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..instance_count as _); // 2.
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..instance_count as _);
+            // 2.
         }
 
         // submit will accept anything that implements IntoIter

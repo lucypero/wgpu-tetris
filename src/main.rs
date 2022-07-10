@@ -1,17 +1,17 @@
 mod game;
-mod renderer;
 mod input;
+mod renderer;
 
+use crate::game::Game;
+use crate::input::Input;
+use crate::renderer::Renderer;
+use std::time::{Duration, Instant};
+use winit::window::Fullscreen::Borderless;
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
-    window::{WindowBuilder, Window},
+    window::{Window, WindowBuilder},
 };
-use winit::window::Fullscreen::Borderless;
-use crate::renderer::Renderer;
-use crate::game::Game;
-use crate::input::Input;
-use std::time::{Duration, Instant};
 
 fn main() {
     pollster::block_on(run());
@@ -21,7 +21,7 @@ pub async fn run() {
     env_logger::init();
     let event_loop = EventLoop::new();
 
-    let inner_size = winit::dpi::PhysicalSize{
+    let inner_size = winit::dpi::PhysicalSize {
         width: renderer::WINDOW_INNER_WIDTH,
         height: renderer::WINDOW_INNER_HEIGHT,
     };
@@ -30,7 +30,8 @@ pub async fn run() {
         .with_title("wgpu-tetris")
         .with_inner_size(inner_size)
         // .with_fullscreen(Some(Borderless(None)))
-        .build(&event_loop).unwrap();
+        .build(&event_loop)
+        .unwrap();
 
     let mut input = Input::new();
     let mut game = Game::new();
@@ -43,26 +44,23 @@ pub async fn run() {
         Event::WindowEvent {
             ref event,
             window_id,
-        } if window_id == window.id() => {
-            match event {
-                WindowEvent::CloseRequested => {
-                    *control_flow = ControlFlow::Exit;
-                }
-                WindowEvent::KeyboardInput {
-                    input: kb_input,
-                    ..
-                } => {
-                    input.process_key_event(kb_input);
-                }
-                WindowEvent::Resized(physical_size) => {
-                    renderer.resize(*physical_size);
-                }
-                WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                    renderer.resize(**new_inner_size);
-                }
-                _ => {}
+        } if window_id == window.id() => match event {
+            WindowEvent::CloseRequested => {
+                *control_flow = ControlFlow::Exit;
             }
-        }
+            WindowEvent::KeyboardInput {
+                input: kb_input, ..
+            } => {
+                input.process_key_event(kb_input);
+            }
+            WindowEvent::Resized(physical_size) => {
+                renderer.resize(*physical_size);
+            }
+            WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                renderer.resize(**new_inner_size);
+            }
+            _ => {}
+        },
         Event::RedrawRequested(window_id) if window_id == window.id() => {
             game.update(&input, now.elapsed());
             now = Instant::now();
@@ -83,7 +81,5 @@ pub async fn run() {
             window.request_redraw();
         }
         _ => {}
-
     })
-
 }
