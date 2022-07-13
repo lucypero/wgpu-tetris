@@ -1,4 +1,4 @@
-use cgmath::{Matrix, Matrix2, Matrix3, Matrix4, SquareMatrix, Vector2, Vector3, Vector4};
+use cgmath::{Vector2, Vector3, Vector4};
 use std::ops::Add;
 use std::time::Duration;
 
@@ -30,6 +30,47 @@ mod color {
 pub struct Block {
     pub pos: Pos,
     pub color: Vec4,
+}
+
+pub struct Camera {
+    pub initial_size: Vector2<f32>,
+    pub position: Vector2<f32>,
+    pub zoom_amount: f32,
+}
+
+impl Camera {
+    fn do_move_controls(&mut self, input: &Input) {
+        const CAM_SPEED: f32 = 20.0;
+        const CAM_ZOOM_STEP: f32 = 0.03;
+        const CAM_ZOOM_MIN: f32 = 0.13;
+        const CAM_ZOOM_MAX: f32 = 4.0;
+
+        //move camera
+        if input.get_key(Keys::W) {
+            self.position += Vector2::new(0.0, CAM_SPEED);
+        }
+        if input.get_key(Keys::A) {
+            self.position += Vector2::new(CAM_SPEED, 0.0);
+        }
+        if input.get_key(Keys::S) {
+            self.position += Vector2::new(0.0, -CAM_SPEED);
+        }
+        if input.get_key(Keys::D) {
+            self.position += Vector2::new(-CAM_SPEED, 0.0);
+        }
+        if input.get_key(Keys::NumpadAdd) {
+            self.zoom_amount -= CAM_ZOOM_STEP;
+            if self.zoom_amount <= CAM_ZOOM_MIN {
+                self.zoom_amount = CAM_ZOOM_MIN;
+            }
+        }
+        if input.get_key(Keys::NumpadSubtract) {
+            self.zoom_amount += CAM_ZOOM_STEP;
+            if self.zoom_amount >= CAM_ZOOM_MAX {
+                self.zoom_amount = CAM_ZOOM_MAX;
+            }
+        }
+    }
 }
 
 pub struct BlockSet {
@@ -130,96 +171,70 @@ impl BlockSet {
             }
             3 => {
                 assert_eq!(self.positions.len(), 3 * 3);
-                let new_mat = rot_mat3::<CW>(Matrix3::new(
-                    self.positions[0],
-                    self.positions[1],
-                    self.positions[2],
-                    self.positions[3],
-                    self.positions[4],
-                    self.positions[5],
-                    self.positions[6],
-                    self.positions[7],
-                    self.positions[8],
-                ));
-
-                self.positions[0] = new_mat.x.x;
-                self.positions[1] = new_mat.x.y;
-                self.positions[2] = new_mat.x.z;
-                self.positions[3] = new_mat.y.x;
-                self.positions[4] = new_mat.y.y;
-                self.positions[5] = new_mat.y.z;
-                self.positions[6] = new_mat.z.x;
-                self.positions[7] = new_mat.z.y;
-                self.positions[8] = new_mat.z.z;
+                let old_pos = self.positions.clone();
+                if CW {
+                    self.positions[0] = old_pos[3 * 0 + 2];
+                    self.positions[1] = old_pos[3 * 1 + 2];
+                    self.positions[2] = old_pos[3 * 2 + 2];
+                    self.positions[3] = old_pos[3 * 0 + 1];
+                    self.positions[4] = old_pos[3 * 1 + 1];
+                    self.positions[5] = old_pos[3 * 2 + 1];
+                    self.positions[6] = old_pos[3 * 0 + 0];
+                    self.positions[7] = old_pos[3 * 1 + 0];
+                    self.positions[8] = old_pos[3 * 2 + 0];
+                } else {
+                    self.positions[0] = old_pos[3 * 2 + 0];
+                    self.positions[1] = old_pos[3 * 1 + 0];
+                    self.positions[2] = old_pos[3 * 0 + 0];
+                    self.positions[3] = old_pos[3 * 2 + 1];
+                    self.positions[4] = old_pos[3 * 1 + 1];
+                    self.positions[5] = old_pos[3 * 0 + 1];
+                    self.positions[6] = old_pos[3 * 2 + 2];
+                    self.positions[7] = old_pos[3 * 1 + 2];
+                    self.positions[8] = old_pos[3 * 0 + 2];
+                }
             }
             4 => {
                 assert_eq!(self.positions.len(), 4 * 4);
-                let new_mat = rot_mat4::<CW>(Matrix4::new(
-                    self.positions[0],
-                    self.positions[1],
-                    self.positions[2],
-                    self.positions[3],
-                    self.positions[4],
-                    self.positions[5],
-                    self.positions[6],
-                    self.positions[7],
-                    self.positions[8],
-                    self.positions[9],
-                    self.positions[10],
-                    self.positions[11],
-                    self.positions[12],
-                    self.positions[13],
-                    self.positions[14],
-                    self.positions[15],
-                ));
-
-                self.positions[0] = new_mat.x.x;
-                self.positions[1] = new_mat.x.y;
-                self.positions[2] = new_mat.x.z;
-                self.positions[3] = new_mat.x.w;
-                self.positions[4] = new_mat.y.x;
-                self.positions[5] = new_mat.y.y;
-                self.positions[6] = new_mat.y.z;
-                self.positions[7] = new_mat.y.w;
-                self.positions[8] = new_mat.z.x;
-                self.positions[9] = new_mat.z.y;
-                self.positions[10] = new_mat.z.z;
-                self.positions[11] = new_mat.z.w;
-                self.positions[12] = new_mat.w.x;
-                self.positions[13] = new_mat.w.y;
-                self.positions[14] = new_mat.w.z;
-                self.positions[15] = new_mat.w.w;
+                let old_pos = self.positions.clone();
+                if CW {
+                    self.positions[0] = old_pos[4 * 0 + 3];
+                    self.positions[1] = old_pos[4 * 1 + 3];
+                    self.positions[2] = old_pos[4 * 2 + 3];
+                    self.positions[3] = old_pos[4 * 3 + 3];
+                    self.positions[4] = old_pos[4 * 0 + 2];
+                    self.positions[5] = old_pos[4 * 1 + 2];
+                    self.positions[6] = old_pos[4 * 2 + 2];
+                    self.positions[7] = old_pos[4 * 3 + 2];
+                    self.positions[8] = old_pos[4 * 0 + 1];
+                    self.positions[9] = old_pos[4 * 1 + 1];
+                    self.positions[10] = old_pos[4 * 2 + 1];
+                    self.positions[11] = old_pos[4 * 3 + 1];
+                    self.positions[12] = old_pos[4 * 0 + 0];
+                    self.positions[13] = old_pos[4 * 1 + 0];
+                    self.positions[14] = old_pos[4 * 2 + 0];
+                    self.positions[15] = old_pos[4 * 3 + 0];
+                } else {
+                    self.positions[0] = old_pos[4 * 3 + 0];
+                    self.positions[1] = old_pos[4 * 2 + 0];
+                    self.positions[2] = old_pos[4 * 1 + 0];
+                    self.positions[3] = old_pos[4 * 0 + 0];
+                    self.positions[4] = old_pos[4 * 3 + 1];
+                    self.positions[5] = old_pos[4 * 2 + 1];
+                    self.positions[6] = old_pos[4 * 1 + 1];
+                    self.positions[7] = old_pos[4 * 0 + 1];
+                    self.positions[8] = old_pos[4 * 3 + 2];
+                    self.positions[9] = old_pos[4 * 2 + 2];
+                    self.positions[10] = old_pos[4 * 1 + 2];
+                    self.positions[11] = old_pos[4 * 0 + 2];
+                    self.positions[12] = old_pos[4 * 3 + 3];
+                    self.positions[13] = old_pos[4 * 2 + 3];
+                    self.positions[14] = old_pos[4 * 1 + 3];
+                    self.positions[15] = old_pos[4 * 0 + 3];
+                }
             }
             _ => panic!("what block set is this?!"),
         };
-    }
-}
-
-fn rot_mat3<const RIGHT: bool>(mat: Matrix3<bool>) -> Matrix3<bool> {
-    if RIGHT {
-        Matrix3::new(
-            mat[0][2], mat[1][2], mat[2][2], mat[0][1], mat[1][1], mat[2][1], mat[0][0], mat[1][0],
-            mat[2][0],
-        )
-    } else {
-        Matrix3::new(
-            mat[2][0], mat[1][0], mat[0][0], mat[2][1], mat[1][1], mat[0][1], mat[2][2], mat[1][2],
-            mat[0][2],
-        )
-    }
-}
-
-fn rot_mat4<const RIGHT: bool>(mat: Matrix4<bool>) -> Matrix4<bool> {
-    if RIGHT {
-        Matrix4::new(
-            mat[0][3], mat[1][3], mat[2][3], mat[3][3], mat[0][2], mat[1][2], mat[2][2], mat[3][2],
-            mat[0][1], mat[1][1], mat[2][1], mat[3][1], mat[0][0], mat[1][0], mat[2][0], mat[3][0],
-        )
-    } else {
-        Matrix4::new(
-            mat[3][0], mat[2][0], mat[1][0], mat[0][0], mat[3][1], mat[2][1], mat[1][1], mat[0][1],
-            mat[3][2], mat[2][2], mat[1][2], mat[0][2], mat[3][3], mat[2][3], mat[1][3], mat[0][3],
-        )
     }
 }
 
@@ -231,10 +246,11 @@ pub struct Game {
     // the bottom left position of the grid.
     pub grid_pos: Vec2,
     tick_timer: Duration,
+    pub camera: Camera,
 }
 
 impl Game {
-    pub fn new() -> Self {
+    pub fn new(cam_initial_size: Vector2<u32>) -> Self {
         let blocks = vec![
             Block {
                 pos: Pos::new(0, 0),
@@ -261,6 +277,42 @@ impl Game {
             grid_pos: Vec2::new(10., 500.),
             active_block_set: Some(BlockSet::new_line()),
             tick_timer: Duration::from_secs(0),
+            camera: Camera {
+                initial_size: Vector2::new(cam_initial_size.x as f32, cam_initial_size.y as f32),
+                position: Vector2::new(0., 0.),
+                zoom_amount: 1.0,
+            },
+        }
+    }
+
+    fn do_block_controls(&mut self, input: &Input) {
+        if let Some(ref mut act_block) = self.active_block_set {
+            if input.get_key_down(Keys::A) {
+                act_block.pos.x -= 1;
+            }
+            if input.get_key_down(Keys::D) {
+                act_block.pos.x += 1;
+            }
+            if input.get_key_down(Keys::W) {
+                act_block.pos.y += 1;
+            }
+            if input.get_key_down(Keys::S) {
+                act_block.pos.y -= 1;
+            }
+            // rotate counter clockwise
+            if input.get_key_down(Keys::H) {
+                act_block.rotate::<false>();
+            }
+            // rotate clockwise
+            if input.get_key_down(Keys::J) {
+                act_block.rotate::<true>();
+            }
+            // do a 180
+            if input.get_key_down(Keys::K) {
+                // yeah i just rotate twice, deal with it
+                act_block.rotate::<true>();
+                act_block.rotate::<true>();
+            }
         }
     }
 
@@ -282,6 +334,7 @@ impl Game {
 
         static mut BLOCK_TYPE_SPAWN: usize = 0;
 
+        // (for testing) swappin active block type
         if input.get_key_down(Keys::Left) {
             //swap block
             unsafe {
@@ -319,24 +372,17 @@ impl Game {
             }
         }
 
-        if let Some(ref mut act_block) = self.active_block_set {
-            if input.get_key_down(Keys::A) {
-                act_block.pos.x -= 1;
+        static mut CONTROL_CAMERA: bool = false;
+
+        unsafe {
+            if input.get_key_down(Keys::Down) {
+                CONTROL_CAMERA = !CONTROL_CAMERA;
             }
-            if input.get_key_down(Keys::D) {
-                act_block.pos.x += 1;
-            }
-            if input.get_key_down(Keys::W) {
-                act_block.pos.y += 1;
-            }
-            if input.get_key_down(Keys::S) {
-                act_block.pos.y -= 1;
-            }
-            if input.get_key_down(Keys::H) {
-                act_block.rotate::<false>();
-            }
-            if input.get_key_down(Keys::J) {
-                act_block.rotate::<true>();
+
+            if CONTROL_CAMERA {
+                self.camera.do_move_controls(&input);
+            } else {
+                self.do_block_controls(&input);
             }
         }
     }

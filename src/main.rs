@@ -6,6 +6,7 @@ use crate::game::Game;
 use crate::input::Input;
 use crate::renderer::Renderer;
 use std::time::{Duration, Instant};
+use cgmath::Vector2;
 use winit::window::Fullscreen::Borderless;
 use winit::{
     event::*,
@@ -34,7 +35,7 @@ pub async fn run() {
         .unwrap();
 
     let mut input = Input::new();
-    let mut game = Game::new();
+    let mut game = Game::new(Vector2::new(inner_size.width, inner_size.height));
     let mut renderer = Renderer::new(&window, &game).await;
 
     let mut frames: u64 = 0;

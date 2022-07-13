@@ -8,6 +8,7 @@ use std::mem;
 use std::mem::MaybeUninit;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use winit::event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent};
+use crate::game::Camera;
 
 pub const WINDOW_INNER_WIDTH: u32 = 1000;
 pub const WINDOW_INNER_HEIGHT: u32 = 600;
@@ -56,68 +57,30 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
 );
 
 //Camera andy
+fn update_cam_buffer(cam: &Camera, cam_bind_group: &mut BindGroupSetThing<CameraUniform>, queue: &wgpu::Queue) {
+    // write new matrix in the uniform
 
-struct Camera {
-    initial_size: Vector2<f32>,
-    position: Vector2<f32>,
-    zoom_amount: f32,
-    bind_group: BindGroupSetThing<CameraUniform>,
-}
+    // transformation
+    let t_mat = Matrix4::from_translation(Vector3::new(cam.position.x, cam.position.y, 0.0));
+    // idk if this should be here. if it works delete this comment:
+    //cam.bind_group.the_data.view_proj = Mat4::from(t_mat);
 
-impl Camera {
-    // do not use this
-    fn change_zoom(&mut self, new_zoom: f32) {
-        // let mut new_mat: Matrix4<f32> = Matrix4::from(self.camera.bind_group.the_data.view_proj.0);
-        // new_mat = new_mat * Matrix4::from_scale(CAM_ZOOM_STEP);
-        // self.camera.bind_group.the_data.view_proj = Mat4::from(new_mat);
+    // zoom
+    let view_proj = {
+        let new_vec = cam.initial_size * cam.zoom_amount;
+        let proj = cgmath::ortho(0.0, new_vec.x, new_vec.y, 0.0, -1.0, 1.0);
+        (OPENGL_TO_WGPU_MATRIX * proj)
+    };
 
-        let view_proj: [[f32; 4]; 4] = {
-            let proj = cgmath::ortho(
-                0.0,
-                self.initial_size.x * new_zoom,
-                self.initial_size.y * new_zoom,
-                0.0,
-                -1.0,
-                1.0,
-            );
-            (OPENGL_TO_WGPU_MATRIX * proj).into()
-        };
+    let new_mat: [[f32; 4]; 4] = (view_proj * t_mat).into();
+    cam_bind_group.the_data.view_proj = new_mat.into();
 
-        self.bind_group.the_data.view_proj = view_proj.into();
-        self.zoom_amount = new_zoom;
-    }
-
-    // do not use this
-    fn pan(&mut self, vec: Vector3<f32>) {
-        let mut new_mat: Matrix4<f32> = Matrix4::from(self.bind_group.the_data.view_proj.0);
-        new_mat = new_mat * Matrix4::from_translation(vec);
-        self.bind_group.the_data.view_proj = Mat4::from(new_mat);
-    }
-
-    fn update_buffer(&mut self, queue: &wgpu::Queue) {
-        // write new matrix in the uniform
-
-        // transformation
-        let t_mat = Matrix4::from_translation(Vector3::new(self.position.x, self.position.y, 0.0));
-        self.bind_group.the_data.view_proj = Mat4::from(t_mat);
-
-        // zoom
-        let view_proj = {
-            let new_vec = self.initial_size * self.zoom_amount;
-            let proj = cgmath::ortho(0.0, new_vec.x, new_vec.y, 0.0, -1.0, 1.0);
-            (OPENGL_TO_WGPU_MATRIX * proj)
-        };
-
-        let new_mat: [[f32; 4]; 4] = (view_proj * t_mat).into();
-        self.bind_group.the_data.view_proj = new_mat.into();
-
-        // write new data to buffer
-        queue.write_buffer(
-            &self.bind_group.buffer,
-            0,
-            bytemuck::cast_slice(&[self.bind_group.the_data]),
-        );
-    }
+    // write new data to buffer
+    queue.write_buffer(
+        &cam_bind_group.buffer,
+        0,
+        bytemuck::cast_slice(&[cam_bind_group.the_data]),
+    );
 }
 
 // we are gonna use an ortho camera
@@ -157,7 +120,7 @@ impl ModelUniform {
                 y: -game::BLOCK_SIZE,
                 z: 0.0,
             })
-            .into();
+                .into();
             model_vec.push(model.into());
         }
 
@@ -180,7 +143,7 @@ impl ColorUniform {
                 z: 1.0,
                 w: 1.0,
             }
-            .into();
+                .into();
             color_vec.push(color);
         }
 
@@ -262,7 +225,7 @@ pub struct Renderer {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
-    camera: Camera,
+    camera_uniform_set: BindGroupSetThing<CameraUniform>,
     model_uniform_set: BindGroupSetThing<ModelUniform>,
     color_uniform_set: BindGroupSetThing<ColorUniform>,
     diffuse_bind_group: wgpu::BindGroup,
@@ -332,7 +295,7 @@ impl Renderer {
 
         // we need an ortho camera
         let camera_uniform =
-            CameraUniform::new(Vector2::new(size.width as f32, size.height as f32));
+            CameraUniform::new(game.camera.initial_size);
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
             contents: bytemuck::cast_slice(&[camera_uniform]),
@@ -365,13 +328,6 @@ impl Renderer {
             the_data: camera_uniform,
             buffer: camera_buffer,
             bind_group: camera_bind_group,
-        };
-
-        let camera = Camera {
-            initial_size: Vector2::new(size.width as f32, size.height as f32),
-            position: Vector2::new(0.0, 0.0),
-            zoom_amount: 1.0,
-            bind_group: camera_uniform_set,
         };
 
         // we need a model matrix and color
@@ -580,7 +536,7 @@ impl Renderer {
             index_buffer,
             num_indices,
             model_uniform_set,
-            camera,
+            camera_uniform_set,
             color_uniform_set,
             diffuse_bind_group,
         }
@@ -640,6 +596,9 @@ impl Renderer {
     pub fn render(&mut self, game: &Game) -> Result<(), wgpu::SurfaceError> {
         // update all the buffers
         {
+            //updating camera
+            update_cam_buffer(&game.camera, &mut self.camera_uniform_set, &self.queue);
+
             //update 0..block len model uniforms
             for i in self
                 .model_uniform_set
@@ -656,7 +615,7 @@ impl Renderer {
                     y: game.grid_pos.y - game::BLOCK_SIZE * block.pos.y as f32,
                     z: 0.0,
                 });
-                i.1 .0 = new_mat.into();
+                i.1.0 = new_mat.into();
             }
 
             // update active blocks uniforms
@@ -689,7 +648,7 @@ impl Renderer {
                         })
                     };
 
-                    i.1 .0 = new_mat.into();
+                    i.1.0 = new_mat.into();
                 }
             }
 
@@ -709,7 +668,7 @@ impl Renderer {
                 .enumerate()
             {
                 let block = &game.fixed_blocks[i.0];
-                i.1 .0 = block.color.into();
+                i.1.0 = block.color.into();
             }
 
             // active block set color
@@ -766,7 +725,7 @@ impl Renderer {
                 depth_stencil_attachment: None,
             });
             render_pass.set_pipeline(&self.render_pipeline); // 2.
-            render_pass.set_bind_group(0, &self.camera.bind_group.bind_group, &[]);
+            render_pass.set_bind_group(0, &self.camera_uniform_set.bind_group, &[]);
             render_pass.set_bind_group(1, &self.model_uniform_set.bind_group, &[]);
             render_pass.set_bind_group(2, &self.color_uniform_set.bind_group, &[]);
             render_pass.set_bind_group(3, &self.diffuse_bind_group, &[]); // NEW!

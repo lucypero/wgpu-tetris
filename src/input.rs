@@ -13,8 +13,8 @@ pub enum Keys {
     K,
     U,
     Space,
-    Plus,
-    Minus,
+    NumpadAdd,
+    NumpadSubtract,
     Right,
     Left,
     Up,
@@ -32,8 +32,8 @@ fn key_to_index(key: Keys) -> usize {
         Keys::K => 6,
         Keys::U => 7,
         Keys::Space => 8,
-        Keys::Plus => 9,
-        Keys::Minus => 10,
+        Keys::NumpadAdd => 9,
+        Keys::NumpadSubtract => 10,
         Keys::Right => 11,
         Keys::Left => 12,
         Keys::Up => 13,
@@ -75,11 +75,11 @@ impl Input {
                 VirtualKeyCode::D => {
                     self.keys[key_to_index(Keys::D)] = pressed;
                 }
-                VirtualKeyCode::Plus => {
-                    self.keys[key_to_index(Keys::Plus)] = pressed;
+                VirtualKeyCode::NumpadAdd => {
+                    self.keys[key_to_index(Keys::NumpadAdd)] = pressed;
                 }
-                VirtualKeyCode::Minus => {
-                    self.keys[key_to_index(Keys::Minus)] = pressed;
+                VirtualKeyCode::NumpadSubtract => {
+                    self.keys[key_to_index(Keys::NumpadSubtract)] = pressed;
                 }
                 VirtualKeyCode::Up => {
                     self.keys[key_to_index(Keys::Up)] = pressed;
@@ -108,7 +108,7 @@ impl Input {
                 VirtualKeyCode::Space => {
                     self.keys[key_to_index(Keys::Space)] = pressed;
                 }
-                _ => {}
+                kc => println!("Key {:?} not implemented! add it in input.rs!", kc),
             },
             _ => {}
         }
