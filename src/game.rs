@@ -11,6 +11,8 @@ type Vec2 = Vector2<f32>;
 type Vec4 = Vector4<f32>;
 
 pub const BLOCK_SIZE: f32 = 30.0;
+pub const GRID_WIDTH: usize = 10;
+pub const GRID_HEIGHT: usize = 20;
 
 // cute block colors
 mod color {
@@ -89,6 +91,99 @@ pub struct BlockSet {
 
 
 impl BlockSet {
+    fn try_to_fit(&mut self, new_positions: Vec<bool>, grid: &Grid) -> (bool, i32) {
+        const MAX_ITERATIONS: i32 = 5;
+
+        let mut new_testing_pos = self.pos;
+
+        /*
+        0
+
+        1 0
+        1 1
+        0 1
+        -1 1
+        -1 0
+        -1 -1
+        0 -1
+        1 -1
+
+        2 0
+        2 1 <- first loop end
+        2 2
+        1 2
+        0 2
+        -1 2 <- second loop end
+        -2 2
+        -2 1
+        -2 0
+        -2 -1 <- third loop end
+        -2 -2
+        -1 -2
+        0 -2
+        1 -2 <- fourth loop end
+        2 -2
+        2 -1 <- fifth loop end
+
+         */
+
+        if self.does_fit(self.pos, &new_positions, grid) {
+            self.positions = new_positions;
+            return (true, 0);
+        }
+
+        for iter_number in 1..=MAX_ITERATIONS {
+            for y_2 in 0..iter_number {
+                new_testing_pos = Pos::new(self.pos.x + iter_number, self.pos.y + y_2);
+                println!("testing pos is {new_testing_pos:?}");
+                if self.does_fit(new_testing_pos, &new_positions, grid) {
+                    self.pos = new_testing_pos;
+                    self.positions = new_positions;
+                    return (true, iter_number);
+                }
+            }
+            for x_2 in (-iter_number + 1..=iter_number).rev() {
+                new_testing_pos = Pos::new(self.pos.x + x_2, self.pos.y + iter_number);
+                println!("testing pos is {new_testing_pos:?}");
+                if self.does_fit(new_testing_pos, &new_positions, grid) {
+                    self.pos = new_testing_pos;
+                    self.positions = new_positions;
+                    return (true, iter_number);
+                }
+            }
+            for y_2 in (-iter_number + 1..=iter_number).rev() {
+                new_testing_pos = Pos::new(self.pos.x - iter_number, self.pos.y + y_2);
+                println!("testing pos is {new_testing_pos:?}");
+                if self.does_fit(new_testing_pos, &new_positions, grid) {
+                    self.pos = new_testing_pos;
+                    self.positions = new_positions;
+                    return (true, iter_number);
+                }
+            }
+            for x_2 in (-iter_number..iter_number) {
+                new_testing_pos = Pos::new(self.pos.x + x_2, self.pos.y - iter_number);
+                println!("testing pos is {new_testing_pos:?}");
+                if self.does_fit(new_testing_pos, &new_positions, grid) {
+                    self.pos = new_testing_pos;
+                    self.positions = new_positions;
+                    return (true, iter_number);
+                }
+            }
+            for y_2 in (-1..=iter_number).rev() {
+                new_testing_pos = Pos::new(self.pos.x + iter_number, self.pos.y + y_2);
+                println!("testing pos is {new_testing_pos:?}");
+                if self.does_fit(new_testing_pos, &new_positions, grid) {
+                    self.pos = new_testing_pos;
+                    self.positions = new_positions;
+                    return (true, iter_number);
+                }
+            }
+        }
+
+        (false, 0)
+    }
+
+
     // does it fit in an alternate global position or alternate position values?
     fn does_fit(&self, new_pos: Pos, new_positions: &Vec<bool>, grid: &Grid) -> bool {
         for (index, is_occupied) in new_positions.iter().enumerate() {
@@ -281,10 +376,27 @@ pub struct Grid {
 }
 
 impl Grid {
+    fn from_test_grid(pos: Vec2, positions: Vec<Pos>) -> Self {
+        let mut blocks = HashMap::new();
+
+        for i in positions {
+            blocks.insert(i, Block {
+                color: color::PINK,
+            });
+        }
+
+        Self {
+            width: GRID_WIDTH,
+            height: GRID_HEIGHT,
+            pos,
+            blocks,
+        }
+    }
+
     fn new(pos: Vec2) -> Self {
         Self {
-            width: 10,
-            height: 20,
+            width: GRID_WIDTH,
+            height: GRID_HEIGHT,
             pos,
             blocks: HashMap::new(),
         }
@@ -326,7 +438,6 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet) {
     let mut cleared_lines: Vec<i32> = Vec::with_capacity(act_block.pos_w);
 
     for y in act_block.pos.y..act_block.pos.y + act_block.pos_w as i32 {
-
         let mut line_cleared = true;
 
         'inner: for x in 0..grid.width {
@@ -353,7 +464,7 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet) {
         }
 
         // shifting all the blocks above 1 less
-        for y_2 in cleared_row+1..grid.height as i32 {
+        for y_2 in cleared_row + 1..grid.height as i32 {
             for x in 0..grid.width {
                 let mut pos_to_shift = Pos::new(x as i32, y_2);
                 if let Some(block) = grid.blocks.remove(&pos_to_shift) {
@@ -367,8 +478,36 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet) {
 
 impl Game {
     pub fn new(cam_initial_size: Vector2<u32>) -> Self {
+        let mut test_grid: Vec<Pos> = Vec::new();
+
+        assert!(GRID_WIDTH > 8);
+        assert!(GRID_HEIGHT > 15);
+        for y in 0..GRID_HEIGHT - 5 {
+            for x in 0..GRID_WIDTH {
+                let pos = Pos::new(x as i32, y as i32);
+
+                if pos.x != 3 &&
+                    pos.x != 4 &&
+                    pos != Pos::new(5, 0) &&
+                    pos != Pos::new(5, 1) &&
+                    pos != Pos::new(5, 2) &&
+                    pos != Pos::new(6, 0) &&
+                    pos != Pos::new(6, 1) &&
+                    pos != Pos::new(6, 2) &&
+                    pos != Pos::new(7, 0) &&
+                    pos != Pos::new(7, 1) &&
+                    pos != Pos::new(7, 2)
+                {
+                    test_grid.push(pos);
+                }
+            }
+        }
+
         Self {
-            grid: Grid::new(Vector2::new(10., cam_initial_size.y as f32 - BLOCK_SIZE - 10.)),
+            grid: Grid::from_test_grid(
+                Vector2::new(10., cam_initial_size.y as f32 - BLOCK_SIZE - 10.),
+                test_grid,
+            ),
             active_block_set: Some(BlockSet::new_line()),
             tick_timer: Duration::from_secs(0),
             camera: Camera {
@@ -415,27 +554,33 @@ impl Game {
                 spawn_new_block_set = true;
             }
 
+            //this will be Some if a rotation is tried
+            let mut new_positions = None;
+
             // rotation
             if input.get_key_down(Keys::H) { // clockwise
-                let new_positions = BlockSet::get_rotated_pos::<false>(&act_block.positions, act_block.pos_w);
-
-                if act_block.does_fit(act_block.pos, &new_positions, &self.grid) {
-                    act_block.positions = new_positions;
-                }
+                new_positions = Some(BlockSet::get_rotated_pos::<false>(&act_block.positions, act_block.pos_w));
             } else if input.get_key_down(Keys::J) { // counter-clockwise
-                let new_positions = BlockSet::get_rotated_pos::<true>(&act_block.positions, act_block.pos_w);
-
-                if act_block.does_fit(act_block.pos, &new_positions, &self.grid) {
-                    act_block.positions = new_positions;
-                }
+                new_positions = Some(BlockSet::get_rotated_pos::<true>(&act_block.positions, act_block.pos_w));
             } else if input.get_key_down(Keys::K) { // 180 rotation
                 // yeah i just rotate twice, deal with it
-                let mut new_positions = BlockSet::get_rotated_pos::<true>(&act_block.positions, act_block.pos_w);
-                new_positions = BlockSet::get_rotated_pos::<true>(&new_positions, act_block.pos_w);
+                let mut new_positions_inner = BlockSet::get_rotated_pos::<true>(&act_block.positions, act_block.pos_w);
+                new_positions_inner = BlockSet::get_rotated_pos::<true>(&new_positions_inner, act_block.pos_w);
 
-                if act_block.does_fit(act_block.pos, &new_positions, &self.grid) {
-                    act_block.positions = new_positions;
-                }
+                new_positions = Some(new_positions_inner);
+            }
+
+            //this will be Some if a rotation has been attempted
+            if let Some(new_rot_positions) = new_positions {
+
+                // resetting down timer for testing
+                self.tick_timer = Duration::from_secs(0);
+                //old code
+                // if act_block.does_fit(act_block.pos, &new_rot_positions, &self.grid) {
+                //     act_block.positions = new_rot_positions;
+                // }
+                let (did_it_fit, iter_number) = act_block.try_to_fit(new_rot_positions, &self.grid);
+                println!("Did it fit? {did_it_fit}, iter number: {iter_number}");
             }
         }
 
@@ -479,7 +624,6 @@ impl Game {
             }
         }
     }
-
 
     fn down_tick(&mut self) {
         let mut spawn_new_block_set = false;
