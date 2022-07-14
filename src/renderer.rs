@@ -1,17 +1,13 @@
 extern crate core;
 
 use crate::{game, Game};
-use cgmath::prelude::*;
 use cgmath::{Matrix4, Vector2, Vector3};
-use rand::Rng;
 use std::mem;
-use std::mem::MaybeUninit;
-use wgpu::util::{BufferInitDescriptor, DeviceExt};
-use winit::event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent};
+use wgpu::util::{DeviceExt};
 use crate::game::Camera;
 
-pub const WINDOW_INNER_WIDTH: u32 = 1000;
-pub const WINDOW_INNER_HEIGHT: u32 = 600;
+pub const WINDOW_INNER_WIDTH: u32 = 600;
+pub const WINDOW_INNER_HEIGHT: u32 = 700;
 // Fixed number of block instances in the instance renderer
 //  In the game, there will always be less than this.
 const BLOCK_COUNT: usize = 1024;
@@ -69,7 +65,7 @@ fn update_cam_buffer(cam: &Camera, cam_bind_group: &mut BindGroupSetThing<Camera
     let view_proj = {
         let new_vec = cam.initial_size * cam.zoom_amount;
         let proj = cgmath::ortho(0.0, new_vec.x, new_vec.y, 0.0, -1.0, 1.0);
-        (OPENGL_TO_WGPU_MATRIX * proj)
+        OPENGL_TO_WGPU_MATRIX * proj
     };
 
     let new_mat: [[f32; 4]; 4] = (view_proj * t_mat).into();
@@ -109,9 +105,7 @@ struct ModelUniform {
 }
 
 impl ModelUniform {
-    fn new(size: winit::dpi::PhysicalSize<u32>) -> Self {
-        let mut i_x = 0;
-        let mut y = 0;
+    fn new() -> Self {
         let mut model_vec: Vec<Mat4> = Vec::with_capacity(BLOCK_COUNT);
 
         for _ in 0..BLOCK_COUNT {
@@ -136,7 +130,7 @@ impl ColorUniform {
     fn new() -> Self {
         let mut color_vec = Vec::with_capacity(BLOCK_COUNT);
 
-        for i in 0..BLOCK_COUNT {
+        for _ in 0..BLOCK_COUNT {
             let color: Vec4 = cgmath::Vector4 {
                 x: 1.0,
                 y: 1.0,
@@ -166,8 +160,6 @@ struct Vertex {
 
 impl Vertex {
     fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
-        use std::mem;
-
         wgpu::VertexBufferLayout {
             array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
@@ -335,7 +327,7 @@ impl Renderer {
         // model matrix : we need to create the buffer and the bind group
         // this is the instance data for the tetris blocks
 
-        let model_uniform = ModelUniform::new(size);
+        let model_uniform = ModelUniform::new();
 
         let model_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("model matrix buffer"),
@@ -600,22 +592,20 @@ impl Renderer {
             update_cam_buffer(&game.camera, &mut self.camera_uniform_set, &self.queue);
 
             //update 0..block len model uniforms
-            for i in self
+            for (the_mat, (pos, _)) in self
                 .model_uniform_set
                 .the_data
                 .model
                 .iter_mut()
-                .take(game.fixed_blocks.len())
-                .enumerate()
+                .take(game.grid.blocks.len())
+                .zip(game.grid.blocks.iter())
             {
-                let block = &game.fixed_blocks[i.0];
-
                 let new_mat = Matrix4::from_translation(Vector3 {
-                    x: game.grid_pos.x + game::BLOCK_SIZE * block.pos.x as f32,
-                    y: game.grid_pos.y - game::BLOCK_SIZE * block.pos.y as f32,
+                    x: game.grid.pos.x + game::BLOCK_SIZE * pos.x as f32,
+                    y: game.grid.pos.y - game::BLOCK_SIZE * pos.y as f32,
                     z: 0.0,
                 });
-                i.1.0 = new_mat.into();
+                the_mat.0 = new_mat.into();
             }
 
             // update active blocks uniforms
@@ -625,7 +615,7 @@ impl Renderer {
                     .the_data
                     .model
                     .iter_mut()
-                    .skip(game.fixed_blocks.len())
+                    .skip(game.grid.blocks.len())
                     .take(act_block.positions.len())
                     .enumerate()
                 {
@@ -634,9 +624,9 @@ impl Renderer {
 
                     let new_mat = if act_block.positions[i.0] {
                         Matrix4::from_translation(Vector3 {
-                            x: game.grid_pos.x
+                            x: game.grid.pos.x
                                 + game::BLOCK_SIZE * (act_block.pos.x as f32 + the_pos_x as f32),
-                            y: game.grid_pos.y
+                            y: game.grid.pos.y
                                 - game::BLOCK_SIZE * (act_block.pos.y as f32 + the_pos_y as f32),
                             z: 0.0,
                         })
@@ -659,16 +649,15 @@ impl Renderer {
             );
 
             //update 0..block len color uniform
-            for i in self
+            for (color_mat, (_, block)) in self
                 .color_uniform_set
                 .the_data
                 .color
                 .iter_mut()
-                .take(game.fixed_blocks.len())
-                .enumerate()
+                .take(game.grid.blocks.len())
+                .zip(game.grid.blocks.iter())
             {
-                let block = &game.fixed_blocks[i.0];
-                i.1.0 = block.color.into();
+                color_mat.0 = block.color.into();
             }
 
             // active block set color
@@ -678,7 +667,7 @@ impl Renderer {
                     .the_data
                     .color
                     .iter_mut()
-                    .skip(game.fixed_blocks.len())
+                    .skip(game.grid.blocks.len())
                     .take(act_block.positions.len())
                 {
                     i.0 = act_block.color.into();
@@ -733,8 +722,8 @@ impl Renderer {
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); // 1.
 
             let instance_count = match game.active_block_set {
-                Some(ref b) => game.fixed_blocks.len() + b.positions.len(),
-                None => game.fixed_blocks.len(),
+                Some(ref b) => game.grid.blocks.len() + b.positions.len(),
+                None => game.grid.blocks.len(),
             };
 
             render_pass.draw_indexed(0..self.num_indices, 0, 0..instance_count as _);

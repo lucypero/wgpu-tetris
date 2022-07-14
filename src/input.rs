@@ -1,4 +1,3 @@
-use std::ops::{Index, IndexMut};
 use strum::EnumCount;
 use winit::event::{ElementState, KeyboardInput, VirtualKeyCode};
 

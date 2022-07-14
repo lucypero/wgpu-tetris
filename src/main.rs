@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod game;
 mod input;
 mod renderer;
@@ -5,13 +7,12 @@ mod renderer;
 use crate::game::Game;
 use crate::input::Input;
 use crate::renderer::Renderer;
-use std::time::{Duration, Instant};
+use std::time::{Instant};
 use cgmath::Vector2;
-use winit::window::Fullscreen::Borderless;
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
-    window::{Window, WindowBuilder},
+    window::{WindowBuilder},
 };
 
 fn main() {
@@ -38,7 +39,6 @@ pub async fn run() {
     let mut game = Game::new(Vector2::new(inner_size.width, inner_size.height));
     let mut renderer = Renderer::new(&window, &game).await;
 
-    let mut frames: u64 = 0;
     let mut now = Instant::now();
 
     event_loop.run(move |event, _, control_flow| match event {

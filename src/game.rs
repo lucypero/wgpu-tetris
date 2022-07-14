@@ -1,17 +1,16 @@
-use cgmath::{Vector2, Vector3, Vector4};
-use std::ops::Add;
+use std::collections::HashMap;
+use cgmath::{Vector2, Vector4};
 use std::time::Duration;
+use rand::{Rng};
 
 use crate::input::{Input, Keys};
 
 // (0,0) is bottom left
 type Pos = Vector2<i32>;
 type Vec2 = Vector2<f32>;
-type Vec3 = Vector3<f32>;
 type Vec4 = Vector4<f32>;
 
-pub const BLOCK_SIZE: f32 = 20.0;
-pub const BLOCK_GAP: f32 = 0.0;
+pub const BLOCK_SIZE: f32 = 30.0;
 
 // cute block colors
 mod color {
@@ -28,8 +27,15 @@ mod color {
 }
 
 pub struct Block {
-    pub pos: Pos,
     pub color: Vec4,
+}
+
+impl Block {
+    fn new() -> Self {
+        Self {
+            color: color::PINK,
+        }
+    }
 }
 
 pub struct Camera {
@@ -81,8 +87,27 @@ pub struct BlockSet {
     pub color: Vec4,
 }
 
+
 impl BlockSet {
-    // sample block set
+    // does it fit in an alternate global position or alternate position values?
+    fn does_fit(&self, new_pos: Pos, new_positions: &Vec<bool>, grid: &Grid) -> bool {
+        for (index, is_occupied) in new_positions.iter().enumerate() {
+            if !is_occupied {
+                continue;
+            }
+
+            let x = index % self.pos_w;
+            let y = index / self.pos_w;
+            let pos_to_test = Pos::new(new_pos.x + x as i32, new_pos.y + y as i32);
+
+            if grid.blocks.contains_key(&pos_to_test) ||
+                !grid.is_inside(pos_to_test) {
+                return false;
+            }
+        }
+        true
+    }
+
     fn new_t() -> Self {
         let positions = vec![false, false, false, true, true, true, false, true, false];
 
@@ -107,8 +132,10 @@ impl BlockSet {
 
     fn new_line() -> Self {
         let positions = vec![
-            false, false, false, false, false, false, false, false, true, true, true, true, false,
-            false, false, false,
+            false, false, false, false,
+            false, false, false, false,
+            true, true, true, true,
+            false, false, false, false,
         ];
 
         Self {
@@ -163,118 +190,185 @@ impl BlockSet {
         }
     }
 
-    fn rotate<const CW: bool>(&mut self) {
-        match self.pos_w {
+    fn get_rotated_pos<const CW: bool>(positions: &Vec<bool>, width: usize) -> Vec<bool> {
+        match width {
             2 => {
                 // we don't actually do anything here hahahha
                 //  because the square fills all slots anyway.
+                positions.clone()
             }
             3 => {
-                assert_eq!(self.positions.len(), 3 * 3);
-                let old_pos = self.positions.clone();
+                assert_eq!(positions.len(), 3 * 3);
                 if CW {
-                    self.positions[0] = old_pos[3 * 0 + 2];
-                    self.positions[1] = old_pos[3 * 1 + 2];
-                    self.positions[2] = old_pos[3 * 2 + 2];
-                    self.positions[3] = old_pos[3 * 0 + 1];
-                    self.positions[4] = old_pos[3 * 1 + 1];
-                    self.positions[5] = old_pos[3 * 2 + 1];
-                    self.positions[6] = old_pos[3 * 0 + 0];
-                    self.positions[7] = old_pos[3 * 1 + 0];
-                    self.positions[8] = old_pos[3 * 2 + 0];
+                    vec![
+                        positions[3 * 0 + 2],
+                        positions[3 * 1 + 2],
+                        positions[3 * 2 + 2],
+                        positions[3 * 0 + 1],
+                        positions[3 * 1 + 1],
+                        positions[3 * 2 + 1],
+                        positions[3 * 0 + 0],
+                        positions[3 * 1 + 0],
+                        positions[3 * 2 + 0],
+                    ]
                 } else {
-                    self.positions[0] = old_pos[3 * 2 + 0];
-                    self.positions[1] = old_pos[3 * 1 + 0];
-                    self.positions[2] = old_pos[3 * 0 + 0];
-                    self.positions[3] = old_pos[3 * 2 + 1];
-                    self.positions[4] = old_pos[3 * 1 + 1];
-                    self.positions[5] = old_pos[3 * 0 + 1];
-                    self.positions[6] = old_pos[3 * 2 + 2];
-                    self.positions[7] = old_pos[3 * 1 + 2];
-                    self.positions[8] = old_pos[3 * 0 + 2];
+                    vec![
+                        positions[3 * 2 + 0],
+                        positions[3 * 1 + 0],
+                        positions[3 * 0 + 0],
+                        positions[3 * 2 + 1],
+                        positions[3 * 1 + 1],
+                        positions[3 * 0 + 1],
+                        positions[3 * 2 + 2],
+                        positions[3 * 1 + 2],
+                        positions[3 * 0 + 2],
+                    ]
                 }
             }
             4 => {
-                assert_eq!(self.positions.len(), 4 * 4);
-                let old_pos = self.positions.clone();
+                assert_eq!(positions.len(), 4 * 4);
                 if CW {
-                    self.positions[0] = old_pos[4 * 0 + 3];
-                    self.positions[1] = old_pos[4 * 1 + 3];
-                    self.positions[2] = old_pos[4 * 2 + 3];
-                    self.positions[3] = old_pos[4 * 3 + 3];
-                    self.positions[4] = old_pos[4 * 0 + 2];
-                    self.positions[5] = old_pos[4 * 1 + 2];
-                    self.positions[6] = old_pos[4 * 2 + 2];
-                    self.positions[7] = old_pos[4 * 3 + 2];
-                    self.positions[8] = old_pos[4 * 0 + 1];
-                    self.positions[9] = old_pos[4 * 1 + 1];
-                    self.positions[10] = old_pos[4 * 2 + 1];
-                    self.positions[11] = old_pos[4 * 3 + 1];
-                    self.positions[12] = old_pos[4 * 0 + 0];
-                    self.positions[13] = old_pos[4 * 1 + 0];
-                    self.positions[14] = old_pos[4 * 2 + 0];
-                    self.positions[15] = old_pos[4 * 3 + 0];
+                    vec![
+                        positions[4 * 0 + 3],
+                        positions[4 * 1 + 3],
+                        positions[4 * 2 + 3],
+                        positions[4 * 3 + 3],
+                        positions[4 * 0 + 2],
+                        positions[4 * 1 + 2],
+                        positions[4 * 2 + 2],
+                        positions[4 * 3 + 2],
+                        positions[4 * 0 + 1],
+                        positions[4 * 1 + 1],
+                        positions[4 * 2 + 1],
+                        positions[4 * 3 + 1],
+                        positions[4 * 0 + 0],
+                        positions[4 * 1 + 0],
+                        positions[4 * 2 + 0],
+                        positions[4 * 3 + 0],
+                    ]
                 } else {
-                    self.positions[0] = old_pos[4 * 3 + 0];
-                    self.positions[1] = old_pos[4 * 2 + 0];
-                    self.positions[2] = old_pos[4 * 1 + 0];
-                    self.positions[3] = old_pos[4 * 0 + 0];
-                    self.positions[4] = old_pos[4 * 3 + 1];
-                    self.positions[5] = old_pos[4 * 2 + 1];
-                    self.positions[6] = old_pos[4 * 1 + 1];
-                    self.positions[7] = old_pos[4 * 0 + 1];
-                    self.positions[8] = old_pos[4 * 3 + 2];
-                    self.positions[9] = old_pos[4 * 2 + 2];
-                    self.positions[10] = old_pos[4 * 1 + 2];
-                    self.positions[11] = old_pos[4 * 0 + 2];
-                    self.positions[12] = old_pos[4 * 3 + 3];
-                    self.positions[13] = old_pos[4 * 2 + 3];
-                    self.positions[14] = old_pos[4 * 1 + 3];
-                    self.positions[15] = old_pos[4 * 0 + 3];
+                    vec![
+                        positions[4 * 3 + 0],
+                        positions[4 * 2 + 0],
+                        positions[4 * 1 + 0],
+                        positions[4 * 0 + 0],
+                        positions[4 * 3 + 1],
+                        positions[4 * 2 + 1],
+                        positions[4 * 1 + 1],
+                        positions[4 * 0 + 1],
+                        positions[4 * 3 + 2],
+                        positions[4 * 2 + 2],
+                        positions[4 * 1 + 2],
+                        positions[4 * 0 + 2],
+                        positions[4 * 3 + 3],
+                        positions[4 * 2 + 3],
+                        positions[4 * 1 + 3],
+                        positions[4 * 0 + 3],
+                    ]
                 }
             }
             _ => panic!("what block set is this?!"),
-        };
+        }
+    }
+}
+
+pub struct Grid {
+    pub blocks: HashMap<Pos, Block>,
+    pub pos: Vec2,
+    // the bottom left position of the grid.
+    pub width: usize,
+    pub height: usize,
+}
+
+impl Grid {
+    fn new(pos: Vec2) -> Self {
+        Self {
+            width: 10,
+            height: 20,
+            pos,
+            blocks: HashMap::new(),
+        }
+    }
+
+    // we do not check if above
+    fn is_inside(&self, pos: Pos) -> bool {
+        pos.x < self.width as i32 &&
+            pos.x >= 0 &&
+            pos.y >= 0
     }
 }
 
 pub struct Game {
-    pub fixed_blocks: Vec<Block>,
     pub active_block_set: Option<BlockSet>,
-    pub grid_w: usize,
-    pub grid_h: usize,
-    // the bottom left position of the grid.
-    pub grid_pos: Vec2,
+    pub grid: Grid,
     tick_timer: Duration,
     pub camera: Camera,
 }
 
+fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet) {
+    for (index, is_occupied) in act_block.positions.iter().enumerate() {
+        if !is_occupied {
+            continue;
+        }
+
+        let x = index % act_block.pos_w;
+        let y = index / act_block.pos_w;
+        let the_pos = Pos::new(act_block.pos.x + x as i32, act_block.pos.y + y as i32);
+
+        grid.blocks.insert(the_pos, Block {
+            color: act_block.color
+        });
+    }
+
+    // checking if u cleared lines
+    // check act_block.pos.y to act_block.pos.y + act_block.pos_w
+
+    let mut cleared_lines: Vec<i32> = Vec::with_capacity(act_block.pos_w);
+
+    for y in act_block.pos.y..act_block.pos.y + act_block.pos_w as i32 {
+
+        let mut line_cleared = true;
+
+        'inner: for x in 0..grid.width {
+            let pos_to_check = Pos::new(x as i32, y);
+            if !grid.blocks.contains_key(&pos_to_check) {
+                line_cleared = false;
+                break 'inner;
+            }
+        }
+
+        if line_cleared {
+            cleared_lines.push(y);
+        }
+    }
+
+    // clearing all full lines and shifting all blocks above by 1 row per cleared line
+    for (index, cleared_row) in cleared_lines.iter().enumerate() {
+        //clearing line
+        let cleared_row = cleared_row - index as i32;
+
+        for x in 0..grid.width {
+            let pos_to_remove = Pos::new(x as i32, cleared_row);
+            grid.blocks.remove(&pos_to_remove);
+        }
+
+        // shifting all the blocks above 1 less
+        for y_2 in cleared_row+1..grid.height as i32 {
+            for x in 0..grid.width {
+                let mut pos_to_shift = Pos::new(x as i32, y_2);
+                if let Some(block) = grid.blocks.remove(&pos_to_shift) {
+                    pos_to_shift.y -= 1;
+                    grid.blocks.insert(pos_to_shift, block);
+                }
+            }
+        }
+    }
+}
+
 impl Game {
     pub fn new(cam_initial_size: Vector2<u32>) -> Self {
-        let blocks = vec![
-            Block {
-                pos: Pos::new(0, 0),
-                color: color::RED,
-            },
-            Block {
-                pos: Pos::new(1, 0),
-                color: color::PINK,
-            },
-            Block {
-                pos: Pos::new(2, 0),
-                color: color::YELLOW,
-            },
-            Block {
-                pos: Pos::new(3, 0),
-                color: color::GREEN,
-            },
-        ];
-
         Self {
-            fixed_blocks: blocks,
-            grid_w: 20,
-            grid_h: 50,
-            grid_pos: Vec2::new(10., 500.),
+            grid: Grid::new(Vector2::new(10., cam_initial_size.y as f32 - BLOCK_SIZE - 10.)),
             active_block_set: Some(BlockSet::new_line()),
             tick_timer: Duration::from_secs(0),
             camera: Camera {
@@ -286,90 +380,133 @@ impl Game {
     }
 
     fn do_block_controls(&mut self, input: &Input) {
+        let mut spawn_new_block_set = false;
+
         if let Some(ref mut act_block) = self.active_block_set {
             if input.get_key_down(Keys::A) {
-                act_block.pos.x -= 1;
+                let new_pos = Pos::new(act_block.pos.x - 1, act_block.pos.y);
+
+                if act_block.does_fit(new_pos, &act_block.positions, &self.grid) {
+                    act_block.pos = new_pos;
+                }
+            } else if input.get_key_down(Keys::D) {
+                let new_pos = Pos::new(act_block.pos.x + 1, act_block.pos.y);
+
+                if act_block.does_fit(new_pos, &act_block.positions, &self.grid) {
+                    act_block.pos = new_pos;
+                }
             }
-            if input.get_key_down(Keys::D) {
-                act_block.pos.x += 1;
+
+
+            //hard drop
+            if input.get_key_down(Keys::Space) {
+                let mut new_pos = Pos::new(act_block.pos.x, act_block.pos.y);
+
+                while act_block.does_fit(new_pos, &act_block.positions, &self.grid) {
+                    new_pos.y -= 1;
+                }
+
+                new_pos.y += 1;
+
+                act_block.pos = new_pos;
+
+                put_down_act_block(&mut self.grid, act_block);
+                //spawn new block
+                spawn_new_block_set = true;
             }
-            if input.get_key_down(Keys::W) {
-                act_block.pos.y += 1;
-            }
-            if input.get_key_down(Keys::S) {
-                act_block.pos.y -= 1;
-            }
-            // rotate counter clockwise
-            if input.get_key_down(Keys::H) {
-                act_block.rotate::<false>();
-            }
-            // rotate clockwise
-            if input.get_key_down(Keys::J) {
-                act_block.rotate::<true>();
-            }
-            // do a 180
-            if input.get_key_down(Keys::K) {
+
+            // rotation
+            if input.get_key_down(Keys::H) { // clockwise
+                let new_positions = BlockSet::get_rotated_pos::<false>(&act_block.positions, act_block.pos_w);
+
+                if act_block.does_fit(act_block.pos, &new_positions, &self.grid) {
+                    act_block.positions = new_positions;
+                }
+            } else if input.get_key_down(Keys::J) { // counter-clockwise
+                let new_positions = BlockSet::get_rotated_pos::<true>(&act_block.positions, act_block.pos_w);
+
+                if act_block.does_fit(act_block.pos, &new_positions, &self.grid) {
+                    act_block.positions = new_positions;
+                }
+            } else if input.get_key_down(Keys::K) { // 180 rotation
                 // yeah i just rotate twice, deal with it
-                act_block.rotate::<true>();
-                act_block.rotate::<true>();
+                let mut new_positions = BlockSet::get_rotated_pos::<true>(&act_block.positions, act_block.pos_w);
+                new_positions = BlockSet::get_rotated_pos::<true>(&new_positions, act_block.pos_w);
+
+                if act_block.does_fit(act_block.pos, &new_positions, &self.grid) {
+                    act_block.positions = new_positions;
+                }
+            }
+        }
+
+        if spawn_new_block_set {
+            self.swap_active_block_set();
+        }
+
+        if input.get_key_down(Keys::S) {
+            self.down_tick();
+            self.tick_timer = Duration::from_secs(0);
+        }
+    }
+
+    fn swap_active_block_set(&mut self) {
+        let mut r = rand::thread_rng();
+        let block_type: usize = r.gen_range(0..6);
+        match block_type {
+            0 => {
+                self.active_block_set = Some(BlockSet::new_line());
+            }
+            1 => {
+                self.active_block_set = Some(BlockSet::new_l());
+            }
+            2 => {
+                self.active_block_set = Some(BlockSet::new_j());
+            }
+            3 => {
+                self.active_block_set = Some(BlockSet::new_t());
+            }
+            4 => {
+                self.active_block_set = Some(BlockSet::new_square());
+            }
+            5 => {
+                self.active_block_set = Some(BlockSet::new_s());
+            }
+            6 => {
+                self.active_block_set = Some(BlockSet::new_z());
+            }
+            _ => {
+                panic!("never gets here");
             }
         }
     }
 
+
     fn down_tick(&mut self) {
+        let mut spawn_new_block_set = false;
+
         if let Some(ref mut act_block) = self.active_block_set {
-            act_block.pos.y -= 1;
+            let new_pos = Pos::new(act_block.pos.x, act_block.pos.y - 1);
+
+            if act_block.does_fit(new_pos, &act_block.positions, &self.grid) {
+                act_block.pos = new_pos;
+            } else {
+                put_down_act_block(&mut self.grid, act_block);
+                spawn_new_block_set = true;
+            }
+        }
+
+        if spawn_new_block_set {
+            self.swap_active_block_set();
         }
     }
 
     pub fn update(&mut self, input: &Input, dt: Duration) {
         self.tick_timer += dt;
 
-        if self.tick_timer.as_secs() >= 1 {
+        if self.tick_timer.as_millis() >= 400 {
             //perform tick
             self.down_tick();
-
-            self.tick_timer = Duration::from_secs(0);
-        }
-
-        static mut BLOCK_TYPE_SPAWN: usize = 0;
-
-        // (for testing) swappin active block type
-        if input.get_key_down(Keys::Left) {
-            //swap block
-            unsafe {
-                BLOCK_TYPE_SPAWN += 1;
-                if BLOCK_TYPE_SPAWN > 6 {
-                    BLOCK_TYPE_SPAWN = 0;
-                }
-
-                match BLOCK_TYPE_SPAWN {
-                    0 => {
-                        self.active_block_set = Some(BlockSet::new_line());
-                    }
-                    1 => {
-                        self.active_block_set = Some(BlockSet::new_l());
-                    }
-                    2 => {
-                        self.active_block_set = Some(BlockSet::new_j());
-                    }
-                    3 => {
-                        self.active_block_set = Some(BlockSet::new_t());
-                    }
-                    4 => {
-                        self.active_block_set = Some(BlockSet::new_square());
-                    }
-                    5 => {
-                        self.active_block_set = Some(BlockSet::new_s());
-                    }
-                    6 => {
-                        self.active_block_set = Some(BlockSet::new_z());
-                    }
-                    _ => {
-                        panic!("never gets here");
-                    }
-                }
-            }
+            self.tick_timer -= Duration::from_millis(400);
         }
 
         static mut CONTROL_CAMERA: bool = false;
