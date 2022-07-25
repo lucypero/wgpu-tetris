@@ -1281,6 +1281,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "thunderdome"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d6b9fe17d23b75b530ce4e6bbd73adb5aa7bbab59ac1c4166224029094c31f5"
+
+[[package]]
 name = "toml"
 version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1288,6 +1294,12 @@ checksum = "8d82e1a7758622a465f8cee077614c73484dac5b836c02ff6a40d5d1010324d7"
 dependencies = [
  "serde",
 ]
+
+[[package]]
+name = "tween"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63e9aab86b1958c0ff7f3d18d04abd6d8e583d237f92e88191ce5c7bf481c5ec"
 
 [[package]]
 name = "unicode-ident"
@@ -1569,6 +1581,8 @@ dependencies = [
  "pollster",
  "rand",
  "strum",
+ "thunderdome",
+ "tween",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

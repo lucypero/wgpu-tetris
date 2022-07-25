@@ -48,7 +48,8 @@ var s_diffuse: sampler;
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var t = textureSample(t_diffuse, s_diffuse, in.tex_coords).x;
     var the_tint = color_buf.color[in.inst_index].xyz;
+//    var the_tint = vec3(1.0,1.0,1.0);
 
     var res = mix(the_tint, vec3(t), abs(t - 0.5) * 2.0);
-    return vec4(res, 1.0);
+    return vec4(res, color_buf.color[in.inst_index].w);
 }

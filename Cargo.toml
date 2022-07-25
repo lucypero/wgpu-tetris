@@ -16,6 +16,8 @@ anyhow = "1.0"
 cgmath = "0.18.0"
 rand = "0.8.5"
 strum = { version = "0.24.1", features = ["derive"] }
+thunderdome = "0.5.1"
+tween = "1.0.1"
 
 [dependencies.image]
 version = "0.24.2"

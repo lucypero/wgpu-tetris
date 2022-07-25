@@ -38,14 +38,14 @@ impl From<[[f32; 4]; 4]> for Mat4 {
     }
 }
 
-impl From<cgmath::Matrix4<f32>> for Mat4 {
-    fn from(the_mat: cgmath::Matrix4<f32>) -> Self {
+impl From<Matrix4<f32>> for Mat4 {
+    fn from(the_mat: Matrix4<f32>) -> Self {
         Mat4(the_mat.into())
     }
 }
 
 #[rustfmt::skip]
-pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
+pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(
     1.0, 0.0, 0.0, 0.0,
     0.0, 1.0, 0.0, 0.0,
     0.0, 0.0, 0.5, 0.0,
@@ -109,7 +109,7 @@ impl ModelUniform {
         let mut model_vec: Vec<Mat4> = Vec::with_capacity(BLOCK_COUNT);
 
         for _ in 0..BLOCK_COUNT {
-            let model: [[f32; 4]; 4] = cgmath::Matrix4::from_translation(Vector3 {
+            let model: [[f32; 4]; 4] = Matrix4::from_translation(Vector3 {
                 x: -game::BLOCK_SIZE,
                 y: -game::BLOCK_SIZE,
                 z: 0.0,
@@ -335,8 +335,8 @@ impl Renderer {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
-        let model_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let model_bind_group_layout = device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
@@ -350,14 +350,15 @@ impl Renderer {
                 label: Some("model_bind_group_layout"),
             });
 
-        let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &model_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: model_buffer.as_entire_binding(),
-            }],
-            label: Some("model_bind_group"),
-        });
+        let model_bind_group = device.create_bind_group(
+            &wgpu::BindGroupDescriptor {
+                layout: &model_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: model_buffer.as_entire_binding(),
+                }],
+                label: Some("model_bind_group"),
+            });
 
         let model_uniform_set = BindGroupSetThing {
             the_data: model_uniform,
@@ -367,6 +368,7 @@ impl Renderer {
 
         // color uniform
         // cute colors for all the bloccs
+
         let color_uniform = ColorUniform::new();
 
         let color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -375,20 +377,10 @@ impl Renderer {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
-        let color_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("color_bind_group_layout"),
-            });
+        let color_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None }],
+            label: Some("color_bind_group_layout"),
+        });
 
         let color_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &color_bind_group_layout,
@@ -405,7 +397,7 @@ impl Renderer {
             bind_group: color_bind_group,
         };
 
-        // the texture
+// the texture
         let diffuse_bytes = include_bytes!("block.png");
         let diffuse_image = image::load_from_memory(diffuse_bytes).unwrap();
         let diffuse_rgba = diffuse_image.to_rgba8();
@@ -444,8 +436,8 @@ impl Renderer {
             texture_size,
         );
 
-        // We don't need to configure the texture view much, so let's
-        // let wgpu define it.
+// We don't need to configure the texture view much, so let's
+// let wgpu define it.
         let diffuse_texture_view =
             diffuse_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let diffuse_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -474,8 +466,8 @@ impl Renderer {
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        // This should match the filterable field of the
-                        // corresponding Texture entry above.
+// This should match the filterable field of the
+// corresponding Texture entry above.
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
@@ -498,14 +490,14 @@ impl Renderer {
             label: Some("diffuse_bind_group"),
         });
 
-        // -- bind group end --
+// -- bind group end --
 
-        // creating pipeline
+// creating pipeline
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
-                    // THE ORDER HERE MATTERS !!!!
+// THE ORDER HERE MATTERS !!!!
                     &camera_bind_group_layout,
                     &model_bind_group_layout,
                     &color_bind_group_layout,
@@ -553,7 +545,7 @@ impl Renderer {
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -591,55 +583,21 @@ impl Renderer {
             //updating camera
             update_cam_buffer(&game.camera, &mut self.camera_uniform_set, &self.queue);
 
-            //update 0..block len model uniforms
-            for (the_mat, (pos, _)) in self
+            // update block model matrices
+            for (the_mat, (_, block)) in self
                 .model_uniform_set
                 .the_data
                 .model
                 .iter_mut()
-                .take(game.grid.blocks.len())
-                .zip(game.grid.blocks.iter())
+                .take(game.blocks.len())
+                .zip(game.blocks.iter())
             {
                 let new_mat = Matrix4::from_translation(Vector3 {
-                    x: game.grid.pos.x + game::BLOCK_SIZE * pos.x as f32,
-                    y: game.grid.pos.y - game::BLOCK_SIZE * pos.y as f32,
+                    x: block.pos.x,
+                    y: block.pos.y,
                     z: 0.0,
                 });
                 the_mat.0 = new_mat.into();
-            }
-
-            // update active blocks uniforms
-            if let Some(ref act_block) = game.active_block_set {
-                for i in self
-                    .model_uniform_set
-                    .the_data
-                    .model
-                    .iter_mut()
-                    .skip(game.grid.blocks.len())
-                    .take(act_block.positions.len())
-                    .enumerate()
-                {
-                    let the_pos_x = i.0 % act_block.pos_w;
-                    let the_pos_y = i.0 / act_block.pos_w;
-
-                    let new_mat = if act_block.positions[i.0] {
-                        Matrix4::from_translation(Vector3 {
-                            x: game.grid.pos.x
-                                + game::BLOCK_SIZE * (act_block.pos.x as f32 + the_pos_x as f32),
-                            y: game.grid.pos.y
-                                - game::BLOCK_SIZE * (act_block.pos.y as f32 + the_pos_y as f32),
-                            z: 0.0,
-                        })
-                    } else {
-                        Matrix4::from_translation(Vector3 {
-                            x: -game::BLOCK_SIZE,
-                            y: 0.0,
-                            z: 0.0,
-                        })
-                    };
-
-                    i.1.0 = new_mat.into();
-                }
             }
 
             self.queue.write_buffer(
@@ -648,30 +606,16 @@ impl Renderer {
                 bytemuck::cast_slice(self.model_uniform_set.the_data.model.as_slice()),
             );
 
-            //update 0..block len color uniform
+            //updating block colors
             for (color_mat, (_, block)) in self
                 .color_uniform_set
                 .the_data
                 .color
                 .iter_mut()
-                .take(game.grid.blocks.len())
-                .zip(game.grid.blocks.iter())
+                .take(game.blocks.len())
+                .zip(game.blocks.iter())
             {
                 color_mat.0 = block.color.into();
-            }
-
-            // active block set color
-            if let Some(ref act_block) = game.active_block_set {
-                for i in self
-                    .color_uniform_set
-                    .the_data
-                    .color
-                    .iter_mut()
-                    .skip(game.grid.blocks.len())
-                    .take(act_block.positions.len())
-                {
-                    i.0 = act_block.color.into();
-                }
             }
 
             self.queue.write_buffer(
@@ -713,21 +657,15 @@ impl Renderer {
                 ],
                 depth_stencil_attachment: None,
             });
-            render_pass.set_pipeline(&self.render_pipeline); // 2.
+            render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.camera_uniform_set.bind_group, &[]);
             render_pass.set_bind_group(1, &self.model_uniform_set.bind_group, &[]);
             render_pass.set_bind_group(2, &self.color_uniform_set.bind_group, &[]);
-            render_pass.set_bind_group(3, &self.diffuse_bind_group, &[]); // NEW!
+            render_pass.set_bind_group(3, &self.diffuse_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); // 1.
+            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 
-            let instance_count = match game.active_block_set {
-                Some(ref b) => game.grid.blocks.len() + b.positions.len(),
-                None => game.grid.blocks.len(),
-            };
-
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..instance_count as _);
-            // 2.
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..game.blocks.len() as _);
         }
 
         // submit will accept anything that implements IntoIter
