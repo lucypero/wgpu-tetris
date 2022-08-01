@@ -13,7 +13,7 @@ type Vec4 = Vector4<f32>;
 type TweenUsed = CircOut<f32, i64>;
 type MyTween = Tweener<TweenUsed>;
 
-pub const BLOCK_SIZE: f32 = 30.0;
+pub const BLOCK_SIZE: f32 = 32.0;
 pub const GRID_WIDTH: usize = 10;
 pub const GRID_HEIGHT: usize = 20;
 
@@ -31,7 +31,11 @@ pub struct BlockSet {
     pub positions: Vec<bool>,
     pub blocks: Vec<Index>,
     pub pos_w: usize,
-    pub pos: Pos, //pos of bottom left block
+    pub pos: Pos,
+    //pos of bottom left block
+    // ghost
+    pub blocks_ghost: Vec<Index>,
+    pub ghost_offset: i32, //y offset from grid origin
 }
 
 pub struct Block {
@@ -67,6 +71,10 @@ mod color {
     pub const COLOR_2: Vec4 = Vec4::new(0.815, 0.121, 1., 1.0);
     pub const COLOR_3: Vec4 = Vec4::new(0.039, 1., 0.647, 1.0);
     pub const COLORS: [Vec4; 7] = [RED, GREEN, PINK, YELLOW, COLOR_1, COLOR_2, COLOR_3];
+
+    pub const GHOST: Vec4 = Vec4::new(1., 1., 1., 0.3);
+    pub const GRID_BG: Vec4 = Vec4::new(1., 1., 1., 0.1);
+    pub const HUD_BG: Vec4 = Vec4::new(0., 0., 0., 1.);
 }
 
 impl Camera {
@@ -213,35 +221,34 @@ impl BlockSet {
         true
     }
 
-
-    fn from_pos(grid: &Grid, pos: Pos, pos_w: usize, positions: Vec<bool>, arena: &mut Arena<Block>, color: Vec4) -> Self {
+    fn from_pos(grid: &Grid, pos: Pos, pos_w: usize, positions: Vec<bool>,
+                arena: &mut Arena<Block>, color: Vec4) -> Self {
         let mut blocks = Vec::new();
+        let mut blocks_ghost = Vec::new();
 
         // creating the new blocks that we need
-        // and positioning them
         for (index, a) in positions.iter().enumerate() {
             if !a {
                 continue;
             }
 
-            let mut pos: Vec2 = grid.get_real_position(pos);
-            let mut pos_x = index % pos_w;
-            let mut pos_y = index / pos_w;
-
-            let pos = Vec2::new(pos.x + BLOCK_SIZE * pos_x as f32,
-                                pos.y - BLOCK_SIZE * pos_y as f32);
-
-            blocks.push(arena.insert(Block::new(pos, color)));
+            blocks.push(arena.insert(Block::new(Vec2::new(0.0, 0.0), color)));
+            blocks_ghost.push(arena.insert(Block::new(Vec2::new(0.0, 0.0), color::GHOST)));
         }
 
-        // TODO: assert something that blocks.len == positions that are true.
-
-        Self {
+        let mut act_block = Self {
             positions,
             blocks,
             pos,
             pos_w,
-        }
+            blocks_ghost,
+            ghost_offset: 0,
+        };
+
+
+        act_block.update_pos::<false>(grid, pos, arena);
+
+        act_block
     }
 
     fn new_t(grid: &Grid, arena: &mut Arena<Block>) -> Self {
@@ -394,11 +401,21 @@ impl BlockSet {
         }
     }
 
-    fn update_pos(&mut self, grid: &Grid, new_pos: Pos, blocks: &mut Arena<Block>) {
+    fn update_pos<const interpolate: bool>(&mut self, grid: &Grid, new_pos: Pos, blocks: &mut Arena<Block>) {
         let mut pos: Vec2 = grid.get_real_position(new_pos);
         self.pos = new_pos;
 
         let mut block_index = 0;
+
+        // getting ghost block position
+        let mut ghost_pos = Pos::new(new_pos.x, new_pos.y);
+
+        while self.does_fit(ghost_pos, &self.positions, grid) {
+            ghost_pos.y -= 1;
+        }
+
+        ghost_pos.y += 1;
+        let ghost_pos: Vec2 = grid.get_real_position(ghost_pos);
 
         for (index, a) in self.positions.iter().enumerate() {
             if !a {
@@ -409,10 +426,14 @@ impl BlockSet {
             let mut pos_x = index % self.pos_w;
             let mut pos_y = index / self.pos_w;
 
-            let pos = Vec2::new(pos.x + BLOCK_SIZE * pos_x as f32,
-                                pos.y - BLOCK_SIZE * pos_y as f32);
+            let pos_f32 = Vec2::new(pos.x + BLOCK_SIZE * pos_x as f32,
+                                    pos.y - BLOCK_SIZE * pos_y as f32);
 
-            blocks[self.blocks[block_index]].update_target_pos(pos);
+            let ghost_pos_f32 = Vec2::new(pos.x + BLOCK_SIZE * pos_x as f32,
+                                          ghost_pos.y - BLOCK_SIZE * pos_y as f32);
+
+            blocks[self.blocks[block_index]].update_target_pos::<interpolate>(pos_f32);
+            blocks[self.blocks_ghost[block_index]].update_target_pos::<interpolate>(ghost_pos_f32);
             block_index += 1;
         }
     }
@@ -456,7 +477,9 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet, blocks: &mut Arena<
             let block_index = act_block.blocks[blocks_i];
 
             grid.block_positions.insert(the_pos, block_index);
-            blocks[block_index].update_target_pos(grid.get_real_position(the_pos));
+            //removing ghost blocks
+            blocks.remove(act_block.blocks_ghost[blocks_i]);
+            blocks[block_index].update_target_pos::<true>(grid.get_real_position(the_pos));
             blocks_i += 1;
         }
     }
@@ -494,9 +517,9 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet, blocks: &mut Arena<
             if let Some(b_index) = b_index {
                 // removing the actual block
                 // u gotta remove the actual block on the arena or disable it or something
-                let nowhere_pos = Vector2::new(-500., 0.);
-                blocks[b_index].pos = nowhere_pos;
-                blocks[b_index].update_target_pos(nowhere_pos);
+                blocks.remove(b_index);
+                // let nowhere_pos = Vector2::new(-500., 0.);
+                // blocks[b_index].update_target_pos::<false>(nowhere_pos);
             }
         }
 
@@ -508,7 +531,7 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet, blocks: &mut Arena<
                     pos_to_shift.y -= 1;
                     grid.block_positions.insert(pos_to_shift, block_index);
                     //update the block position
-                    blocks[block_index].update_target_pos(grid.get_real_position(pos_to_shift))
+                    blocks[block_index].update_target_pos::<true>(grid.get_real_position(pos_to_shift))
                 }
             }
         }
@@ -537,14 +560,24 @@ impl Block {
         }
     }
 
-    fn update_target_pos(&mut self, new_pos: Vec2) {
-        let range = self.pos.x..=new_pos.x;
+    fn update_target_pos<const interpolate: bool>(&mut self, new_pos: Vec2) {
+
+        let range = if interpolate {
+            self.pos.x..=new_pos.x
+        } else {
+            new_pos.x..=new_pos.x
+        };
+
         let duration = 300;
 
         let tween = TweenUsed::new(range, duration);
         self.tweener_x = Tweener::new(tween);
 
-        let range = self.pos.y..=new_pos.y;
+        let range = if interpolate {
+            self.pos.y..=new_pos.y
+        } else {
+            new_pos.y..=new_pos.y
+        };
 
         let tween = TweenUsed::new(range, duration);
         self.tweener_y = Tweener::new(tween);
@@ -556,45 +589,8 @@ impl Game {
         let mut test_grid: Vec<Pos> = Vec::new();
 
         let mut arena = Arena::new();
-        let grid_pos = Vector2::new(10., cam_initial_size.y as f32 - BLOCK_SIZE - 10.);
+        let grid_pos = Vector2::new(BLOCK_SIZE + 10., cam_initial_size.y as f32 - BLOCK_SIZE * 2. - 10.);
         let mut grid_positions = HashMap::new();
-
-        // test grid
-        /*
-
-        assert!(GRID_WIDTH > 8);
-        assert!(GRID_HEIGHT > 15);
-        for y in 0..GRID_HEIGHT - 5 {
-            for x in 0..GRID_WIDTH {
-                let pos = Pos::new(x as i32, y as i32);
-
-                if pos.x != 3 &&
-                    pos.x != 4 &&
-                    pos != Pos::new(5, 0) &&
-                    pos != Pos::new(5, 1) &&
-                    pos != Pos::new(5, 2) &&
-                    pos != Pos::new(6, 0) &&
-                    pos != Pos::new(6, 1) &&
-                    pos != Pos::new(6, 2) &&
-                    pos != Pos::new(7, 0) &&
-                    pos != Pos::new(7, 1) &&
-                    pos != Pos::new(7, 2)
-                {
-                    let block_pos = Vector2::new(grid_pos.x + pos.x as f32 * BLOCK_SIZE,
-                                                 grid_pos.y - pos.y as f32 * BLOCK_SIZE);
-
-                    grid_positions.insert(pos,
-                                          arena.insert(Block {
-                                              pos: block_pos,
-                                              target_pos: block_pos,
-                                              color: color::PINK,
-                                          }
-                                          ));
-                }
-            }
-        }
-
-        */
 
         let grid = Grid {
             block_positions: grid_positions,
@@ -604,6 +600,23 @@ impl Game {
         };
 
         let active_block_set = Some(BlockSet::new_line(&grid, &mut arena));
+
+        //making background
+        for x in -1i32..=grid.width as i32 {
+            for y in -1i32..=grid.height as i32 {
+                let pos = Pos::new(x,y);
+                let real_pos = grid.get_real_position(pos);
+
+                let color = if x >= 0 && x < grid.width as i32 &&
+                            y >= 0 && y < grid.height as i32 {
+                    color::GRID_BG
+                } else {
+                    color::HUD_BG
+                };
+
+                arena.insert(Block::new(real_pos, color));
+            }
+        }
 
         Self {
             blocks: arena,
@@ -626,13 +639,13 @@ impl Game {
                 let new_pos = Pos::new(act_block.pos.x - 1, act_block.pos.y);
 
                 if act_block.does_fit(new_pos, &act_block.positions, &self.grid) {
-                    act_block.update_pos(&self.grid, new_pos, &mut self.blocks);
+                    act_block.update_pos::<true>(&self.grid, new_pos, &mut self.blocks);
                 }
             } else if input.get_key_down(Keys::D) {
                 let new_pos = Pos::new(act_block.pos.x + 1, act_block.pos.y);
 
                 if act_block.does_fit(new_pos, &act_block.positions, &self.grid) {
-                    act_block.update_pos(&self.grid, new_pos, &mut self.blocks);
+                    act_block.update_pos::<true>(&self.grid, new_pos, &mut self.blocks);
                 }
             }
 
@@ -646,7 +659,7 @@ impl Game {
 
                 new_pos.y += 1;
 
-                act_block.update_pos(&self.grid, new_pos, &mut self.blocks);
+                act_block.update_pos::<true>(&self.grid, new_pos, &mut self.blocks);
 
                 put_down_act_block(&mut self.grid, act_block, &mut self.blocks);
                 //spawn new block
@@ -677,7 +690,7 @@ impl Game {
 
                 let (did_it_fit, iter_number) =
                     act_block.try_to_fit(new_rot_positions, &self.grid, &mut self.blocks);
-                act_block.update_pos(&self.grid, act_block.pos, &mut self.blocks);
+                act_block.update_pos::<true>(&self.grid, act_block.pos, &mut self.blocks);
                 // println!("Did it fit? {did_it_fit}, iter number: {iter_number}");
             }
         }
@@ -714,7 +727,7 @@ impl Game {
 
             if act_block.does_fit(new_pos, &act_block.positions, &self.grid) {
                 //updating block positions too
-                act_block.update_pos(&self.grid, new_pos, &mut self.blocks);
+                act_block.update_pos::<true>(&self.grid, new_pos, &mut self.blocks);
             } else {
                 put_down_act_block(&mut self.grid, act_block, &mut self.blocks);
                 spawn_new_block_set = true;

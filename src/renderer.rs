@@ -1,13 +1,14 @@
 extern crate core;
 
 use crate::{game, Game};
-use cgmath::{Matrix4, Vector2, Vector3};
+use cgmath::{Matrix4, Point3, Vector2, Vector3};
 use std::mem;
+use wgpu::{BindGroup, BindGroupLayout, BindingResource, Device, ShaderStages};
 use wgpu::util::{DeviceExt};
 use crate::game::Camera;
 
 pub const WINDOW_INNER_WIDTH: u32 = 600;
-pub const WINDOW_INNER_HEIGHT: u32 = 700;
+pub const WINDOW_INNER_HEIGHT: u32 = 900;
 // Fixed number of block instances in the instance renderer
 //  In the game, there will always be less than this.
 const BLOCK_COUNT: usize = 1024;
@@ -52,7 +53,37 @@ pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(
     0.0, 0.0, 0.5, 1.0,
 );
 
-//Camera andy
+// helpers
+fn build_storage_buffer_layout(device: &Device, stages: ShaderStages) -> BindGroupLayout {
+    device.create_bind_group_layout(
+        &wgpu::BindGroupLayoutDescriptor {
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: stages,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            label: None,
+        })
+}
+
+fn build_bind_group(device: &Device, layout: &BindGroupLayout, resource: BindingResource) -> BindGroup {
+    device.create_bind_group(
+        &wgpu::BindGroupDescriptor {
+            layout: &layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource
+            }],
+            label: None,
+        })
+}
+
+// Camera andy
 fn update_cam_buffer(cam: &Camera, cam_bind_group: &mut BindGroupSetThing<CameraUniform>, queue: &wgpu::Queue) {
     // write new matrix in the uniform
 
@@ -93,6 +124,31 @@ impl CameraUniform {
             let proj = cgmath::ortho(0.0, size.x, size.y, 0.0, -1.0, 1.0);
             (OPENGL_TO_WGPU_MATRIX * proj).into()
         };
+
+        // tried a 3d camera. it isn't working out.
+
+        /*
+
+        // position the camera one unit up and 2 units back
+        // +z is out of the screen
+        let eye: Point3<f32> = (0.0, 0.0, -3.0).into();
+        // have it look at the origin
+        let target: Point3<f32> = (0.0, 0.0, 0.0).into();
+        // which way is "up"
+        let up: Vector3<f32> = Vector3::unit_y();
+        let aspect = size.x as f32 / size.y as f32;
+        let fovy = 45.0;
+        let znear = 0.1;
+        let zfar = 100.0;
+
+        // 1.
+        let view = Matrix4::look_at_rh(eye, target, up);
+        // 2.
+        let proj = cgmath::perspective(cgmath::Deg(fovy), aspect, znear, zfar);
+
+        let res = OPENGL_TO_WGPU_MATRIX * proj * view;
+
+         */
 
         Self {
             view_proj: view_proj.into(),
@@ -148,6 +204,7 @@ impl ColorUniform {
 struct BindGroupSetThing<T> {
     the_data: T,
     buffer: wgpu::Buffer,
+    layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
 }
 
@@ -319,6 +376,7 @@ impl Renderer {
         let camera_uniform_set = BindGroupSetThing {
             the_data: camera_uniform,
             buffer: camera_buffer,
+            layout: camera_bind_group_layout,
             bind_group: camera_bind_group,
         };
 
@@ -335,34 +393,18 @@ impl Renderer {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
-        let model_bind_group_layout = device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("model_bind_group_layout"),
-            });
+        let model_bind_group_layout = build_storage_buffer_layout(&device, ShaderStages::VERTEX);
 
-        let model_bind_group = device.create_bind_group(
-            &wgpu::BindGroupDescriptor {
-                layout: &model_bind_group_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: model_buffer.as_entire_binding(),
-                }],
-                label: Some("model_bind_group"),
-            });
+        let model_bind_group = build_bind_group(
+            &device,
+            &model_bind_group_layout,
+            model_buffer.as_entire_binding(),
+        );
 
         let model_uniform_set = BindGroupSetThing {
             the_data: model_uniform,
             buffer: model_buffer,
+            layout: model_bind_group_layout,
             bind_group: model_bind_group,
         };
 
@@ -377,27 +419,23 @@ impl Renderer {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
-        let color_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None }],
-            label: Some("color_bind_group_layout"),
-        });
+        let color_layout = build_storage_buffer_layout(&device, ShaderStages::FRAGMENT);
 
-        let color_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &color_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: color_buffer.as_entire_binding(),
-            }],
-            label: Some("model_bind_group"),
-        });
+        let color_bind_group = build_bind_group(
+            &device,
+            &color_layout,
+            color_buffer.as_entire_binding()
+        );
 
         let color_uniform_set = BindGroupSetThing {
             the_data: color_uniform,
             buffer: color_buffer,
+            layout: color_layout,
             bind_group: color_bind_group,
         };
 
-// the texture
+        // the texture
+
         let diffuse_bytes = include_bytes!("block.png");
         let diffuse_image = image::load_from_memory(diffuse_bytes).unwrap();
         let diffuse_rgba = diffuse_image.to_rgba8();
@@ -498,9 +536,9 @@ impl Renderer {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
 // THE ORDER HERE MATTERS !!!!
-                    &camera_bind_group_layout,
-                    &model_bind_group_layout,
-                    &color_bind_group_layout,
+                    &camera_uniform_set.layout,
+                    &model_uniform_set.layout,
+                    &color_uniform_set.layout,
                     &texture_bind_group_layout,
                 ],
                 push_constant_ranges: &[],

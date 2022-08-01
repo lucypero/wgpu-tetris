@@ -31,6 +31,10 @@ pub async fn run() {
     let window = WindowBuilder::new()
         .with_title("wgpu-tetris")
         .with_inner_size(inner_size)
+        .with_position(winit::dpi::PhysicalPosition {
+            x: 300.,
+            y: 10.
+        })
         // .with_fullscreen(Some(Borderless(None)))
         .build(&event_loop)
         .unwrap();
