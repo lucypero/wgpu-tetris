@@ -7,7 +7,7 @@ use wgpu::{BindGroup, BindGroupLayout, BindingResource, Device, ShaderStages};
 use wgpu::util::{DeviceExt};
 use crate::game::Camera;
 
-pub const WINDOW_INNER_WIDTH: u32 = 600;
+pub const WINDOW_INNER_WIDTH: u32 = 1000;
 pub const WINDOW_INNER_HEIGHT: u32 = 900;
 // Fixed number of block instances in the instance renderer
 //  In the game, there will always be less than this.

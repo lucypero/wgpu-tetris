@@ -1,5 +1,5 @@
 struct ModelUniform {
-    model: array< mat4x4<f32> >,
+    model: array<mat4x4<f32>>,
 };
 struct CameraUniform {
     view_proj: mat4x4<f32>,
@@ -34,7 +34,7 @@ fn vs_main(
 }
 
 struct ColorUniform {
-    color: array< vec4<f32> >,
+    color: array<vec4<f32>>,
 };
 @group(2) @binding(0)
 var<storage, read> color_buf: ColorUniform;
