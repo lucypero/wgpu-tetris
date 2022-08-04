@@ -1,0 +1,25 @@
+First goal:
+
+- Shader needs to have:
+
+Todo:
+
+- do a bindgroupthing::new
+- try to generlize the texture and camera creation too
+
+- make the game respect one static aspect ratio regardless of window res
+
+Ralith:
+
+it doesn't have to be complicated or abstract, your renderer can deeply
+encode knowledge of the structure of your game
+the point is that the game doesn't encode knowledge of the renderer
+
+------ how to make the next block randomness ----
+
+just keep a list of piece types [L, J, S, Z, T, O, I] and an index = 0,
+shuffle the list when index == 0 and index = (index + 1) % piece_types.length each time
+
+every next piece you generate will just be the next in the list
+and each time you reach the end of the list, you reset the index to 0 and re-shuffle
+so that next time you iterate over the list it will be random again

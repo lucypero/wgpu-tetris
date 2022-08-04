@@ -1,11 +1,13 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use cgmath::{Vector2, Vector4};
 use std::time::Duration;
 use rand::{Rng};
+use rand::seq::SliceRandom;
 use thunderdome::{Arena, Index};
 use crate::input::{Input, Keys};
 use tween::{CircIn, CircInOut, CircOut, SineInOut, SineOut, Tweener};
 use strum::{EnumCount, EnumIter};
+use strum::IntoEnumIterator;
 
 // (0,0) is bottom left (of grid)
 type Pos = Vector2<i32>;
@@ -20,8 +22,10 @@ pub const GRID_HEIGHT: usize = 20;
 
 const ACTIVE_BLOCK_START_POS: Pos = Pos::new(3, 20);
 const HOLD_BLOCK_POS: Vec2 = Vec2::new(30.0, BLOCK_SIZE * 10.0);
+const NEXT_BLOCKS_COUNT: usize = 5;
+const FIRST_BLOCK_POS_Y: f32 = 250.0;
 
-#[derive(EnumCount, EnumIter, Copy, Clone)]
+#[derive(EnumCount, EnumIter, Copy, Clone, Debug)]
 enum BlockSetType {
     T,
     Square,
@@ -40,6 +44,10 @@ pub struct Game {
     tick_timer: Duration,
     pub camera: Camera,
     hold_enabled: bool,
+    next_blocks: VecDeque<StaticBlockSet>,
+    next_block_types: Vec<BlockSetType>,
+    next_block_index: usize,
+    rng: rand::rngs::ThreadRng,
 }
 
 struct StaticBlockSet {
@@ -488,6 +496,68 @@ impl BlockSet {
 }
 
 impl StaticBlockSet {
+    fn from_pos(positions: Vec<bool>, pos_w: usize, arena: &mut Arena<Block>,
+                set_type: BlockSetType, color: Vec4) -> Self {
+        let mut blocks = Vec::new();
+
+        // creating the new blocks that we need
+        for a in positions.iter() {
+            if !a {
+                continue;
+            }
+
+            blocks.push(arena.insert(Block::new(Vec2::new(0.0, 0.0), color)));
+        }
+
+        Self {
+            positions,
+            set_type,
+            blocks,
+            pos_w,
+            pos: Vec2::new(0.0, 0.0),
+        }
+    }
+
+    fn new_t(arena: &mut Arena<Block>) -> Self {
+        let positions = vec![false, false, false, true, true, true, false, true, false];
+        Self::from_pos(positions, 3, arena, BlockSetType::T, color::COLORS[0])
+    }
+
+    fn new_square(arena: &mut Arena<Block>) -> Self {
+        let positions = vec![true, true, true, true];
+        Self::from_pos(positions, 2, arena, BlockSetType::Square, color::COLORS[1])
+    }
+
+    fn new_line(arena: &mut Arena<Block>) -> Self {
+        let positions = vec![
+            false, false, false, false,
+            false, false, false, false,
+            true, true, true, true,
+            false, false, false, false,
+        ];
+        Self::from_pos(positions, 4, arena, BlockSetType::Line, color::COLORS[2])
+    }
+
+    fn new_l(arena: &mut Arena<Block>) -> Self {
+        let positions = vec![false, false, false, true, true, true, false, false, true];
+        Self::from_pos(positions, 3, arena, BlockSetType::L, color::COLORS[3])
+    }
+
+    fn new_j(arena: &mut Arena<Block>) -> Self {
+        let positions = vec![false, false, false, true, true, true, true, false, false];
+        Self::from_pos(positions, 3, arena, BlockSetType::J, color::COLORS[4])
+    }
+
+    fn new_s(arena: &mut Arena<Block>) -> Self {
+        let positions = vec![false, false, false, false, true, true, true, true, false];
+        Self::from_pos(positions, 3, arena, BlockSetType::S, color::COLORS[5])
+    }
+
+    fn new_z(arena: &mut Arena<Block>) -> Self {
+        let positions = vec![false, false, false, true, true, false, false, true, true];
+        Self::from_pos(positions, 3, arena, BlockSetType::Z, color::COLORS[6])
+    }
+
     // given a new pos, it sets the new pos then moves all the owned blocks
     fn update_pos<const interpolate: bool>(&mut self, new_pos: Vec2, blocks: &mut Arena<Block>) {
         self.pos = new_pos;
@@ -661,7 +731,6 @@ impl Game {
             height: GRID_HEIGHT,
         };
 
-        let active_block_set = Some(BlockSet::new_line(&grid, &mut arena));
 
         //making background
         for x in -1i32..=grid.width as i32 {
@@ -680,9 +749,56 @@ impl Game {
             }
         }
 
-        Self {
+        //do the random next list
+
+        // use strum::IntoEnumIterator;
+        // self.swap_active_block_set(BlockSetType::iter().get(rand_index).unwrap());
+
+        let mut next_block_types: Vec<BlockSetType> = Vec::with_capacity(BlockSetType::COUNT * 2);
+
+        for _ in 0..2 {
+            for blockset_type in BlockSetType::iter() {
+                next_block_types.push(blockset_type);
+            }
+        }
+
+        let mut rng = rand::thread_rng();
+        next_block_types.as_mut_slice().shuffle(&mut rng);
+
+        let mut next_blocks: VecDeque<StaticBlockSet> = VecDeque::with_capacity(NEXT_BLOCKS_COUNT + 1);
+
+        for i in 0..NEXT_BLOCKS_COUNT + 1 {
+            next_blocks.push_back(match next_block_types[i] {
+                BlockSetType::T => StaticBlockSet::new_t(&mut arena),
+                BlockSetType::Square => StaticBlockSet::new_square(&mut arena),
+                BlockSetType::Line => StaticBlockSet::new_line(&mut arena),
+                BlockSetType::L => StaticBlockSet::new_l(&mut arena),
+                BlockSetType::J => StaticBlockSet::new_j(&mut arena),
+                BlockSetType::S => StaticBlockSet::new_s(&mut arena),
+                BlockSetType::Z => StaticBlockSet::new_z(&mut arena),
+            });
+        }
+
+        // positioning the next blocks
+
+        for (i, block_set) in next_blocks.iter_mut().enumerate() {
+            let mut block_pos = Vec2::new(
+                grid.pos.x + (GRID_WIDTH + 2) as f32 * BLOCK_SIZE + 20.0,
+                FIRST_BLOCK_POS_Y);
+
+            if i >= NEXT_BLOCKS_COUNT {
+                block_pos.x += 1000.0; //has to be past window size
+                block_pos.y += BLOCK_SIZE * 4.0 * (NEXT_BLOCKS_COUNT - 1) as f32;
+            } else {
+                block_pos.y += BLOCK_SIZE * 4.0 * i as f32;
+            }
+
+            block_set.update_pos::<false>(block_pos, &mut arena);
+        }
+
+        let mut game = Self {
             blocks: arena,
-            active_block_set,
+            active_block_set: None,
             grid,
             tick_timer: Duration::from_secs(0),
             camera: Camera {
@@ -692,7 +808,15 @@ impl Game {
             },
             hold_block_preview: None,
             hold_enabled: true,
-        }
+            next_blocks,
+            next_block_types,
+            next_block_index: 0,
+            rng,
+        };
+
+        game.swap_active_block_set_from_next_blocks();
+
+        game
     }
 
     fn do_block_controls(&mut self, input: &Input) {
@@ -772,34 +896,13 @@ impl Game {
         }
 
         if let Some(new_hold) = new_hold {
-
             let mut hold_preview = self.active_block_set.take().unwrap().static_block_set;
 
             // moving hold block to active block set
             if let Some(hold_block) = self.hold_block_preview.take() {
-
-                let mut blocks_ghost = Vec::new();
-
-                for a in hold_block.positions.iter() {
-                    if !a {
-                        continue;
-                    }
-
-                    blocks_ghost.push(self.blocks.insert(Block::new(Vec2::new(0.0, 0.0), color::GHOST)));
-                }
-
-                self.active_block_set = Some(BlockSet{
-                    static_block_set: hold_block,
-                    grid_pos: ACTIVE_BLOCK_START_POS,
-                    blocks_ghost,
-                    ghost_offset: 0,
-                });
-
-                self.active_block_set.as_mut().unwrap().update_pos::<true>(&self.grid, ACTIVE_BLOCK_START_POS, &mut self.blocks);
-
-                // self.swap_active_block_set(hold_block.set_type);
+                self.consume_block_set_into_active_set(hold_block);
             } else {
-                self.swap_active_block_set_random();
+                self.swap_active_block_set_from_next_blocks();
             }
 
             hold_preview.update_pos::<true>(HOLD_BLOCK_POS, &mut self.blocks);
@@ -807,7 +910,7 @@ impl Game {
             //TODO what happens to the old hold?
             self.hold_block_preview = Some(hold_preview);
         } else if spawn_new_random_block {
-            self.swap_active_block_set_random();
+            self.swap_active_block_set_from_next_blocks();
         }
 
         if input.get_key_down(Keys::S) {
@@ -828,11 +931,65 @@ impl Game {
         });
     }
 
-    fn swap_active_block_set_random(&mut self) {
-        use strum::IntoEnumIterator;
-        let mut r = rand::thread_rng();
-        let rand_index: usize = r.gen_range(0..BlockSetType::COUNT);
-        self.swap_active_block_set(BlockSetType::iter().get(rand_index).unwrap());
+    fn consume_block_set_into_active_set(&mut self, block_set: StaticBlockSet) {
+        // moving block from the next list to active block set
+        let mut blocks_ghost = Vec::new();
+
+        for a in block_set.positions.iter() {
+            if !a { continue; }
+            blocks_ghost.push(self.blocks.insert(Block::new(block_set.pos, color::GHOST)));
+        }
+
+        self.active_block_set = Some(BlockSet {
+            static_block_set: block_set,
+            grid_pos: ACTIVE_BLOCK_START_POS,
+            blocks_ghost,
+            ghost_offset: 0,
+        });
+
+        self.active_block_set.as_mut().unwrap().update_pos::<true>(
+            &self.grid,
+            ACTIVE_BLOCK_START_POS,
+            &mut self.blocks);
+    }
+
+    fn swap_active_block_set_from_next_blocks(&mut self) {
+        let next_block = self.next_blocks.pop_front().unwrap();
+        self.consume_block_set_into_active_set(next_block);
+
+        // Creating a new block at the end of the queue
+        self.next_blocks.push_back(match self.next_block_types[self.next_block_index] {
+            BlockSetType::T => StaticBlockSet::new_t(&mut self.blocks),
+            BlockSetType::Square => StaticBlockSet::new_square(&mut self.blocks),
+            BlockSetType::Line => StaticBlockSet::new_line(&mut self.blocks),
+            BlockSetType::L => StaticBlockSet::new_l(&mut self.blocks),
+            BlockSetType::J => StaticBlockSet::new_j(&mut self.blocks),
+            BlockSetType::S => StaticBlockSet::new_s(&mut self.blocks),
+            BlockSetType::Z => StaticBlockSet::new_z(&mut self.blocks),
+        });
+
+        self.next_block_index += 1;
+
+        if self.next_block_index >= self.next_blocks.len() {
+            self.next_block_index = 0;
+            self.next_block_types.as_mut_slice().shuffle(&mut self.rng);
+        }
+
+        // Updating position of the queue blocks
+        for (i, block_set) in self.next_blocks.iter_mut().enumerate() {
+            let mut block_pos = Vec2::new(
+                self.grid.pos.x + (GRID_WIDTH + 2) as f32 * BLOCK_SIZE + 20.0,
+                FIRST_BLOCK_POS_Y);
+
+            if i >= NEXT_BLOCKS_COUNT {
+                block_pos.x += 1000.0; //has to be past window size
+                block_pos.y += BLOCK_SIZE * 4.0 * (NEXT_BLOCKS_COUNT - 1) as f32;
+                block_set.update_pos::<false>(block_pos, &mut self.blocks);
+            } else {
+                block_pos.y += BLOCK_SIZE * 4.0 * i as f32;
+                block_set.update_pos::<true>(block_pos, &mut self.blocks);
+            }
+        }
     }
 
     fn down_tick(&mut self) {
@@ -852,7 +1009,7 @@ impl Game {
         }
 
         if spawn_new_block_set {
-            self.swap_active_block_set_random();
+            self.swap_active_block_set_from_next_blocks();
         }
     }
 
