@@ -1,13 +1,12 @@
-use std::collections::{HashMap, VecDeque};
-use cgmath::{Vector2, Vector4};
-use std::time::Duration;
-use rand::{Rng};
-use rand::seq::SliceRandom;
-use thunderdome::{Arena, Index};
 use crate::input::{Input, Keys};
-use tween::{CircIn, CircInOut, CircOut, SineInOut, SineOut, Tweener};
-use strum::{EnumCount, EnumIter};
-use strum::IntoEnumIterator;
+use libs::rand;
+use libs::cgmath::{Vector2, Vector4};
+use libs::rand::seq::SliceRandom;
+use std::collections::{HashMap, VecDeque};
+use std::time::Duration;
+use libs::thunderdome::{Arena, Index};
+use libs::tween::{CircOut, Tweener};
+
 
 // (0,0) is bottom left (of grid)
 type Pos = Vector2<i32>;
@@ -25,7 +24,11 @@ const HOLD_BLOCK_POS: Vec2 = Vec2::new(30.0, BLOCK_SIZE * 10.0);
 const NEXT_BLOCKS_COUNT: usize = 5;
 const FIRST_BLOCK_POS_Y: f32 = 250.0;
 
-#[derive(EnumCount, EnumIter, Copy, Clone, Debug)]
+pub fn foo(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+#[derive(Copy, Clone, Debug)]
 enum BlockSetType {
     T,
     Square,
@@ -35,6 +38,7 @@ enum BlockSetType {
     S,
     Z,
 }
+const BLOCK_COUNT: usize = 8;
 
 pub struct Game {
     pub blocks: Arena<Block>,
@@ -140,10 +144,10 @@ impl Camera {
 }
 
 impl BlockSet {
-    fn try_to_fit(&mut self, new_positions: Vec<bool>, grid: &Grid, blocks: &mut Arena<Block>) -> (bool, i32) {
+    fn try_to_fit(&mut self, new_positions: Vec<bool>, grid: &Grid) -> (bool, i32) {
         const MAX_ITERATIONS: i32 = 5;
 
-        let mut new_testing_pos = self.grid_pos;
+        let mut new_testing_pos;
 
         /*
         0
@@ -206,7 +210,7 @@ impl BlockSet {
                     return (true, iter_number);
                 }
             }
-            for x_2 in (-iter_number..iter_number) {
+            for x_2 in -iter_number..iter_number {
                 new_testing_pos = Pos::new(self.grid_pos.x + x_2, self.grid_pos.y - iter_number);
                 if self.does_fit(new_testing_pos, &new_positions, grid) {
                     self.grid_pos = new_testing_pos;
@@ -224,13 +228,12 @@ impl BlockSet {
             }
         }
 
-
         (false, 0)
     }
 
     fn remove_blocks(&mut self, blocks: &mut Arena<Block>) {
         let mut blocks_i = 0;
-        for (index, is_occupied) in self.static_block_set.positions.iter().enumerate() {
+        for is_occupied in self.static_block_set.positions.iter() {
             if !is_occupied {
                 continue;
             }
@@ -264,16 +267,22 @@ impl BlockSet {
             let y = index / self.static_block_set.pos_w;
             let pos_to_test = Pos::new(new_pos.x + x as i32, new_pos.y + y as i32);
 
-            if grid.block_positions.contains_key(&pos_to_test) ||
-                !grid.is_inside(pos_to_test) {
+            if grid.block_positions.contains_key(&pos_to_test) || !grid.is_inside(pos_to_test) {
                 return false;
             }
         }
         true
     }
 
-    fn from_pos(grid: &Grid, pos: Pos, pos_w: usize, positions: Vec<bool>,
-                arena: &mut Arena<Block>, set_type: BlockSetType, color: Vec4) -> Self {
+    fn from_pos(
+        grid: &Grid,
+        pos: Pos,
+        pos_w: usize,
+        positions: Vec<bool>,
+        arena: &mut Arena<Block>,
+        set_type: BlockSetType,
+        color: Vec4,
+    ) -> Self {
         let mut blocks = Vec::new();
         let mut blocks_ghost = Vec::new();
 
@@ -322,22 +331,36 @@ impl BlockSet {
         let pos = ACTIVE_BLOCK_START_POS;
         let color = color::COLORS[1];
 
-        Self::from_pos(grid, pos, pos_w, positions, arena, BlockSetType::Square, color)
+        Self::from_pos(
+            grid,
+            pos,
+            pos_w,
+            positions,
+            arena,
+            BlockSetType::Square,
+            color,
+        )
     }
 
     fn new_line(grid: &Grid, arena: &mut Arena<Block>) -> Self {
         let positions = vec![
-            false, false, false, false,
-            false, false, false, false,
-            true, true, true, true,
-            false, false, false, false,
+            false, false, false, false, false, false, false, false, true, true, true, true, false,
+            false, false, false,
         ];
 
         let pos_w = 4;
         let pos = ACTIVE_BLOCK_START_POS;
         let color = color::COLORS[2];
 
-        Self::from_pos(grid, pos, pos_w, positions, arena, BlockSetType::Line, color)
+        Self::from_pos(
+            grid,
+            pos,
+            pos_w,
+            positions,
+            arena,
+            BlockSetType::Line,
+            color,
+        )
     }
 
     fn new_l(grid: &Grid, arena: &mut Arena<Block>) -> Self {
@@ -457,8 +480,13 @@ impl BlockSet {
         }
     }
 
-    fn update_pos<const interpolate: bool>(&mut self, grid: &Grid, new_pos: Pos, blocks: &mut Arena<Block>) {
-        let mut pos: Vec2 = grid.get_real_position(new_pos);
+    fn update_pos<const INTERPOLATE: bool>(
+        &mut self,
+        grid: &Grid,
+        new_pos: Pos,
+        blocks: &mut Arena<Block>,
+    ) {
+        let pos: Vec2 = grid.get_real_position(new_pos);
         self.grid_pos = new_pos;
 
         let mut block_index = 0;
@@ -479,25 +507,35 @@ impl BlockSet {
                 continue;
             }
 
-            let mut pos_x = index % self.static_block_set.pos_w;
-            let mut pos_y = index / self.static_block_set.pos_w;
+            let pos_x = index % self.static_block_set.pos_w;
+            let pos_y = index / self.static_block_set.pos_w;
 
-            let pos_f32 = Vec2::new(pos.x + BLOCK_SIZE * pos_x as f32,
-                                    pos.y - BLOCK_SIZE * pos_y as f32);
+            let pos_f32 = Vec2::new(
+                pos.x + BLOCK_SIZE * pos_x as f32,
+                pos.y - BLOCK_SIZE * pos_y as f32,
+            );
 
-            let ghost_pos_f32 = Vec2::new(pos.x + BLOCK_SIZE * pos_x as f32,
-                                          ghost_pos.y - BLOCK_SIZE * pos_y as f32);
+            let ghost_pos_f32 = Vec2::new(
+                pos.x + BLOCK_SIZE * pos_x as f32,
+                ghost_pos.y - BLOCK_SIZE * pos_y as f32,
+            );
 
-            blocks[self.static_block_set.blocks[block_index]].update_target_pos::<interpolate>(pos_f32);
-            blocks[self.blocks_ghost[block_index]].update_target_pos::<interpolate>(ghost_pos_f32);
+            blocks[self.static_block_set.blocks[block_index]]
+                .update_target_pos::<INTERPOLATE>(pos_f32);
+            blocks[self.blocks_ghost[block_index]].update_target_pos::<INTERPOLATE>(ghost_pos_f32);
             block_index += 1;
         }
     }
 }
 
 impl StaticBlockSet {
-    fn from_pos(positions: Vec<bool>, pos_w: usize, arena: &mut Arena<Block>,
-                set_type: BlockSetType, color: Vec4) -> Self {
+    fn from_pos(
+        positions: Vec<bool>,
+        pos_w: usize,
+        arena: &mut Arena<Block>,
+        set_type: BlockSetType,
+        color: Vec4,
+    ) -> Self {
         let mut blocks = Vec::new();
 
         // creating the new blocks that we need
@@ -530,10 +568,8 @@ impl StaticBlockSet {
 
     fn new_line(arena: &mut Arena<Block>) -> Self {
         let positions = vec![
-            false, false, false, false,
-            false, false, false, false,
-            true, true, true, true,
-            false, false, false, false,
+            false, false, false, false, false, false, false, false, true, true, true, true, false,
+            false, false, false,
         ];
         Self::from_pos(positions, 4, arena, BlockSetType::Line, color::COLORS[2])
     }
@@ -559,7 +595,7 @@ impl StaticBlockSet {
     }
 
     // given a new pos, it sets the new pos then moves all the owned blocks
-    fn update_pos<const interpolate: bool>(&mut self, new_pos: Vec2, blocks: &mut Arena<Block>) {
+    fn update_pos<const INTERPOLATE: bool>(&mut self, new_pos: Vec2, blocks: &mut Arena<Block>) {
         self.pos = new_pos;
 
         let mut block_index = 0;
@@ -570,13 +606,15 @@ impl StaticBlockSet {
                 continue;
             }
 
-            let mut pos_x = index % self.pos_w;
-            let mut pos_y = index / self.pos_w;
+            let pos_x = index % self.pos_w;
+            let pos_y = index / self.pos_w;
 
-            let pos_f32 = Vec2::new(self.pos.x + BLOCK_SIZE * pos_x as f32,
-                                    self.pos.y - BLOCK_SIZE * pos_y as f32);
+            let pos_f32 = Vec2::new(
+                self.pos.x + BLOCK_SIZE * pos_x as f32,
+                self.pos.y - BLOCK_SIZE * pos_y as f32,
+            );
 
-            blocks[self.blocks[block_index]].update_target_pos::<interpolate>(pos_f32);
+            blocks[self.blocks[block_index]].update_target_pos::<INTERPOLATE>(pos_f32);
             block_index += 1;
         }
     }
@@ -585,13 +623,14 @@ impl StaticBlockSet {
 impl Grid {
     // we do not check if above
     fn is_inside(&self, pos: Pos) -> bool {
-        pos.x < self.width as i32 &&
-            pos.x >= 0 &&
-            pos.y >= 0
+        pos.x < self.width as i32 && pos.x >= 0 && pos.y >= 0
     }
 
     fn get_real_position(&self, pos: Pos) -> Vec2 {
-        Vec2::new(self.pos.x + pos.x as f32 * BLOCK_SIZE, self.pos.y - pos.y as f32 * BLOCK_SIZE)
+        Vec2::new(
+            self.pos.x + pos.x as f32 * BLOCK_SIZE,
+            self.pos.y - pos.y as f32 * BLOCK_SIZE,
+        )
     }
 }
 
@@ -605,7 +644,10 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet, blocks: &mut Arena<
 
             let x = index % act_block.static_block_set.pos_w;
             let y = index / act_block.static_block_set.pos_w;
-            let the_pos = Pos::new(act_block.grid_pos.x + x as i32, act_block.grid_pos.y + y as i32);
+            let the_pos = Pos::new(
+                act_block.grid_pos.x + x as i32,
+                act_block.grid_pos.y + y as i32,
+            );
 
             let block_index = act_block.static_block_set.blocks[blocks_i];
 
@@ -616,7 +658,6 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet, blocks: &mut Arena<
             blocks_i += 1;
         }
     }
-
 
     // checking if u cleared lines
     // check act_block.pos.y to act_block.pos.y + act_block.pos_w
@@ -664,7 +705,8 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet, blocks: &mut Arena<
                     pos_to_shift.y -= 1;
                     grid.block_positions.insert(pos_to_shift, block_index);
                     //update the block position
-                    blocks[block_index].update_target_pos::<true>(grid.get_real_position(pos_to_shift))
+                    blocks[block_index]
+                        .update_target_pos::<true>(grid.get_real_position(pos_to_shift))
                 }
             }
         }
@@ -693,8 +735,8 @@ impl Block {
         }
     }
 
-    fn update_target_pos<const interpolate: bool>(&mut self, new_pos: Vec2) {
-        let range = if interpolate {
+    fn update_target_pos<const INTERPOLATE: bool>(&mut self, new_pos: Vec2) {
+        let range = if INTERPOLATE {
             self.pos.x..=new_pos.x
         } else {
             new_pos.x..=new_pos.x
@@ -705,7 +747,7 @@ impl Block {
         let tween = TweenUsed::new(range, duration);
         self.tweener_x = Tweener::new(tween);
 
-        let range = if interpolate {
+        let range = if INTERPOLATE {
             self.pos.y..=new_pos.y
         } else {
             new_pos.y..=new_pos.y
@@ -718,11 +760,12 @@ impl Block {
 
 impl Game {
     pub fn new(cam_initial_size: Vector2<u32>) -> Self {
-        let mut test_grid: Vec<Pos> = Vec::new();
-
         let mut arena = Arena::new();
-        let grid_pos = Vector2::new(BLOCK_SIZE * 6.0 + 10., cam_initial_size.y as f32 - BLOCK_SIZE * 2. - 10.);
-        let mut grid_positions = HashMap::new();
+        let grid_pos = Vector2::new(
+            BLOCK_SIZE * 6.0 + 10.,
+            cam_initial_size.y as f32 - BLOCK_SIZE * 2. - 10.,
+        );
+        let grid_positions = HashMap::new();
 
         let grid = Grid {
             block_positions: grid_positions,
@@ -731,6 +774,7 @@ impl Game {
             height: GRID_HEIGHT,
         };
 
+        foo(1, 2);
 
         //making background
         for x in -1i32..=grid.width as i32 {
@@ -738,8 +782,7 @@ impl Game {
                 let pos = Pos::new(x, y);
                 let real_pos = grid.get_real_position(pos);
 
-                let color = if x >= 0 && x < grid.width as i32 &&
-                    y >= 0 && y < grid.height as i32 {
+                let color = if x >= 0 && x < grid.width as i32 && y >= 0 && y < grid.height as i32 {
                     color::GRID_BG
                 } else {
                     color::HUD_BG
@@ -754,18 +797,23 @@ impl Game {
         // use strum::IntoEnumIterator;
         // self.swap_active_block_set(BlockSetType::iter().get(rand_index).unwrap());
 
-        let mut next_block_types: Vec<BlockSetType> = Vec::with_capacity(BlockSetType::COUNT * 2);
+        let mut next_block_types: Vec<BlockSetType> = Vec::with_capacity(BLOCK_COUNT * 2);
 
         for _ in 0..2 {
-            for blockset_type in BlockSetType::iter() {
-                next_block_types.push(blockset_type);
-            }
+            next_block_types.push(BlockSetType::T);
+            next_block_types.push(BlockSetType::Square);
+            next_block_types.push(BlockSetType::Line);
+            next_block_types.push(BlockSetType::L);
+            next_block_types.push(BlockSetType::J);
+            next_block_types.push(BlockSetType::S);
+            next_block_types.push(BlockSetType::Z);
         }
 
         let mut rng = rand::thread_rng();
         next_block_types.as_mut_slice().shuffle(&mut rng);
 
-        let mut next_blocks: VecDeque<StaticBlockSet> = VecDeque::with_capacity(NEXT_BLOCKS_COUNT + 1);
+        let mut next_blocks: VecDeque<StaticBlockSet> =
+            VecDeque::with_capacity(NEXT_BLOCKS_COUNT + 1);
 
         for i in 0..NEXT_BLOCKS_COUNT + 1 {
             next_blocks.push_back(match next_block_types[i] {
@@ -784,7 +832,8 @@ impl Game {
         for (i, block_set) in next_blocks.iter_mut().enumerate() {
             let mut block_pos = Vec2::new(
                 grid.pos.x + (GRID_WIDTH + 2) as f32 * BLOCK_SIZE + 20.0,
-                FIRST_BLOCK_POS_Y);
+                FIRST_BLOCK_POS_Y,
+            );
 
             if i >= NEXT_BLOCKS_COUNT {
                 block_pos.x += 1000.0; //has to be past window size
@@ -842,7 +891,8 @@ impl Game {
             if input.get_key_down(Keys::Space) {
                 let mut new_pos = Pos::new(act_block.grid_pos.x, act_block.grid_pos.y);
 
-                while act_block.does_fit(new_pos, &act_block.static_block_set.positions, &self.grid) {
+                while act_block.does_fit(new_pos, &act_block.static_block_set.positions, &self.grid)
+                {
                     new_pos.y -= 1;
                 }
 
@@ -860,26 +910,40 @@ impl Game {
             let mut new_positions = None;
 
             // rotation
-            if input.get_key_down(Keys::H) { // clockwise
-                new_positions = Some(BlockSet::get_rotated_pos::<false>(&act_block.static_block_set.positions, act_block.static_block_set.pos_w));
-            } else if input.get_key_down(Keys::J) { // counter-clockwise
-                new_positions = Some(BlockSet::get_rotated_pos::<true>(&act_block.static_block_set.positions, act_block.static_block_set.pos_w));
-            } else if input.get_key_down(Keys::K) { // 180 rotation
+            if input.get_key_down(Keys::H) {
+                // clockwise
+                new_positions = Some(BlockSet::get_rotated_pos::<false>(
+                    &act_block.static_block_set.positions,
+                    act_block.static_block_set.pos_w,
+                ));
+            } else if input.get_key_down(Keys::J) {
+                // counter-clockwise
+                new_positions = Some(BlockSet::get_rotated_pos::<true>(
+                    &act_block.static_block_set.positions,
+                    act_block.static_block_set.pos_w,
+                ));
+            } else if input.get_key_down(Keys::K) {
+                // 180 rotation
                 // yeah i just rotate twice, deal with it
-                let mut new_positions_inner = BlockSet::get_rotated_pos::<true>(&act_block.static_block_set.positions, act_block.static_block_set.pos_w);
-                new_positions_inner = BlockSet::get_rotated_pos::<true>(&new_positions_inner, act_block.static_block_set.pos_w);
+                let mut new_positions_inner = BlockSet::get_rotated_pos::<true>(
+                    &act_block.static_block_set.positions,
+                    act_block.static_block_set.pos_w,
+                );
+                new_positions_inner = BlockSet::get_rotated_pos::<true>(
+                    &new_positions_inner,
+                    act_block.static_block_set.pos_w,
+                );
 
                 new_positions = Some(new_positions_inner);
             }
 
             //this will be Some if a rotation has been attempted
             if let Some(new_rot_positions) = new_positions {
-
                 // resetting down timer for testing
                 self.tick_timer = Duration::from_secs(0);
 
-                let (did_it_fit, iter_number) =
-                    act_block.try_to_fit(new_rot_positions, &self.grid, &mut self.blocks);
+                let (_did_it_fit, _iter_number) =
+                    act_block.try_to_fit(new_rot_positions, &self.grid);
                 act_block.update_pos::<true>(&self.grid, act_block.grid_pos, &mut self.blocks);
                 // println!("Did it fit? {did_it_fit}, iter number: {iter_number}");
             }
@@ -895,7 +959,7 @@ impl Game {
             }
         }
 
-        if let Some(new_hold) = new_hold {
+        if let Some(_new_hold) = new_hold {
             let mut hold_preview = self.active_block_set.take().unwrap().static_block_set;
 
             // moving hold block to active block set
@@ -936,7 +1000,9 @@ impl Game {
         let mut blocks_ghost = Vec::new();
 
         for a in block_set.positions.iter() {
-            if !a { continue; }
+            if !a {
+                continue;
+            }
             blocks_ghost.push(self.blocks.insert(Block::new(block_set.pos, color::GHOST)));
         }
 
@@ -950,7 +1016,8 @@ impl Game {
         self.active_block_set.as_mut().unwrap().update_pos::<true>(
             &self.grid,
             ACTIVE_BLOCK_START_POS,
-            &mut self.blocks);
+            &mut self.blocks,
+        );
     }
 
     fn swap_active_block_set_from_next_blocks(&mut self) {
@@ -958,15 +1025,16 @@ impl Game {
         self.consume_block_set_into_active_set(next_block);
 
         // Creating a new block at the end of the queue
-        self.next_blocks.push_back(match self.next_block_types[self.next_block_index] {
-            BlockSetType::T => StaticBlockSet::new_t(&mut self.blocks),
-            BlockSetType::Square => StaticBlockSet::new_square(&mut self.blocks),
-            BlockSetType::Line => StaticBlockSet::new_line(&mut self.blocks),
-            BlockSetType::L => StaticBlockSet::new_l(&mut self.blocks),
-            BlockSetType::J => StaticBlockSet::new_j(&mut self.blocks),
-            BlockSetType::S => StaticBlockSet::new_s(&mut self.blocks),
-            BlockSetType::Z => StaticBlockSet::new_z(&mut self.blocks),
-        });
+        self.next_blocks
+            .push_back(match self.next_block_types[self.next_block_index] {
+                BlockSetType::T => StaticBlockSet::new_t(&mut self.blocks),
+                BlockSetType::Square => StaticBlockSet::new_square(&mut self.blocks),
+                BlockSetType::Line => StaticBlockSet::new_line(&mut self.blocks),
+                BlockSetType::L => StaticBlockSet::new_l(&mut self.blocks),
+                BlockSetType::J => StaticBlockSet::new_j(&mut self.blocks),
+                BlockSetType::S => StaticBlockSet::new_s(&mut self.blocks),
+                BlockSetType::Z => StaticBlockSet::new_z(&mut self.blocks),
+            });
 
         self.next_block_index += 1;
 
@@ -979,7 +1047,8 @@ impl Game {
         for (i, block_set) in self.next_blocks.iter_mut().enumerate() {
             let mut block_pos = Vec2::new(
                 self.grid.pos.x + (GRID_WIDTH + 2) as f32 * BLOCK_SIZE + 20.0,
-                FIRST_BLOCK_POS_Y);
+                FIRST_BLOCK_POS_Y,
+            );
 
             if i >= NEXT_BLOCKS_COUNT {
                 block_pos.x += 1000.0; //has to be past window size

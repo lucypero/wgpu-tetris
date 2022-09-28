@@ -28,6 +28,8 @@ fn vs_main(
 ) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = camera.view_proj * model_mat.model[model.inst_index] * vec4<f32>(model.position, 1.0);
+
+    var outUV = vec2<f32>(f32((model.inst_index << u32(1)) & u32(2)), f32(model.inst_index & u32(2)));
     out.tex_coords = model.tex_coords;
     out.inst_index = model.inst_index;
     return out;

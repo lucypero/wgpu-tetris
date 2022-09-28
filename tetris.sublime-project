@@ -1,0 +1,32 @@
+{
+	"folders":
+	[
+		{
+			"path": "."
+		}
+	],
+	"build_systems":
+	[
+		{
+			"name": "custom rust build",
+			"syntax": "MyCargo.sublime-syntax",
+			"file_regex": "(?|, ([^,<\n]*\\.[A-z]{2}):([0-9]+)|[ \t]*-->[ \t]*([^<\n]*):([0-9]+):([0-9]+))",
+			"shell_cmd": "cargo build",
+			"working_dir": "$folder",
+			"variants": [
+				{
+					"name": "rustc - debug and run",
+					"shell_cmd": "rustc --crate-name wgpu_tetris --edition=2021 src\\main.rs --crate-type bin -C embed-bitcode=no -C debuginfo=0 --out-dir C:\\Users\\Lucy\\dev\\wgpu-tetris\\build -C linker=rust-lld.exe -C incremental=C:\\Users\\Lucy\\dev\\wgpu-tetris\\target\\debug\\incremental -L dependency=C:\\Users\\Lucy\\dev\\wgpu-tetris\\target\\debug\\deps --extern libs=C:\\Users\\Lucy\\dev\\wgpu-tetris\\build\\wgpu_dynamic.dll && .\\build\\wgpu_tetris.exe",
+				},
+				{
+					"name": "rustc - debug",
+					"shell_cmd": "rustc --crate-name wgpu_tetris --edition=2021 src\\main.rs --crate-type bin -C embed-bitcode=no -C debuginfo=0 --out-dir C:\\Users\\Lucy\\dev\\wgpu-tetris\\build -C linker=rust-lld.exe -C incremental=C:\\Users\\Lucy\\dev\\wgpu-tetris\\target\\debug\\incremental -L dependency=C:\\Users\\Lucy\\dev\\wgpu-tetris\\target\\debug\\deps --extern libs=C:\\Users\\Lucy\\dev\\wgpu-tetris\\build\\wgpu_dynamic.dll",
+				},
+				{
+					"name": "rustc - release and run",
+					"shell_cmd": "rustc --crate-name wgpu_tetris --edition=2021 src\\main.rs --crate-type bin -C embed-bitcode=no -C debuginfo=0 -C opt-level=3 --out-dir C:\\Users\\Lucy\\dev\\wgpu-tetris\\build\\release -C linker=rust-lld.exe -C incremental=C:\\Users\\Lucy\\dev\\wgpu-tetris\\target\\release\\incremental -L dependency=C:\\Users\\Lucy\\dev\\wgpu-tetris\\target\\release\\deps --extern libs=C:\\Users\\Lucy\\dev\\wgpu-tetris\\build\\release\\wgpu_dynamic.dll && .\\build\\release\\wgpu_tetris.exe",
+				}
+			]
+		}
+	]
+}

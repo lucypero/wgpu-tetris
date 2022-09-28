@@ -1,0 +1,25 @@
+[package]
+name = "wgpu-dynamic"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wgpu = { version = "0.13", features = ["webgl"] }
+winit = "0.26"
+pollster = "0.2"
+bytemuck = { version = "1.4" }
+cgmath = "0.18.0"
+rand = "0.8.5"
+thunderdome = "0.5.1"
+tween = "1.0.1"
+
+[dependencies.image]
+version = "0.24.2"
+default-features = false
+features = ["png", "jpeg"]
+
+[lib]
+crate-type = ["dylib"]
+
+[profile.dev.package."*"]
+opt-level = 3

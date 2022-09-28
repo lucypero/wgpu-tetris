@@ -4,23 +4,46 @@ mod game;
 mod input;
 mod renderer;
 
+// self.do_block_controls($b) ==>> do_block_controls(&mut self, $b)
+
+// self.do_block_controls(&input);
+
+// pub struct Game {
+//     pub blocks: Arena<Block>,
+//     active_block_set: Option<BlockSet>,
+//     hold_block_preview: Option<StaticBlockSet>,
+//     pub grid: Grid,
+//     tick_timer: Duration,
+//     pub camera: Camera,
+//     hold_enabled: bool,
+//     next_blocks: VecDeque<StaticBlockSet>,
+//     next_block_types: Vec<BlockSetType>,
+//     next_block_index: usize,
+//     rng: rand::rngs::ThreadRng,
+// }
+
+
 use crate::game::Game;
 use crate::input::Input;
 use crate::renderer::Renderer;
-use std::time::{Instant};
-use cgmath::Vector2;
-use winit::{
+use std::time::Instant;
+
+use libs::cgmath::Vector2;
+use libs::wgpu;
+use libs::winit;
+use libs::winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
-    window::{WindowBuilder},
+    window::WindowBuilder,
 };
 
+// foo($a, $b) ==>> foo($b, $a)
+
 fn main() {
-    pollster::block_on(run());
+    libs::pollster::block_on(run());
 }
 
 pub async fn run() {
-    env_logger::init();
     let event_loop = EventLoop::new();
 
     let inner_size = winit::dpi::PhysicalSize {
@@ -31,10 +54,7 @@ pub async fn run() {
     let window = WindowBuilder::new()
         .with_title("wgpu-tetris")
         .with_inner_size(inner_size)
-        .with_position(winit::dpi::PhysicalPosition {
-            x: 300.,
-            y: 10.
-        })
+        .with_position(winit::dpi::PhysicalPosition { x: 300., y: 10. })
         // .with_fullscreen(Some(Borderless(None)))
         .build(&event_loop)
         .unwrap();

@@ -1,10 +1,15 @@
 extern crate core;
 
 use crate::{game, Game};
-use cgmath::{Matrix4, Point3, Vector2, Vector3};
+use libs::cgmath::{Matrix4, Vector2, Vector3};
 use std::mem;
-use wgpu::{BindGroup, BindGroupLayout, BindingResource, Device, ShaderStages};
-use wgpu::util::{DeviceExt};
+use libs::wgpu;
+use libs::image;
+use libs::bytemuck;
+use libs::cgmath;
+use libs::winit;
+use libs::wgpu::{BindGroup, BindGroupLayout, BindingResource, Device, ShaderStages};
+use libs::wgpu::util::{DeviceExt};
 use crate::game::Camera;
 
 pub const WINDOW_INNER_WIDTH: u32 = 1000;
@@ -14,8 +19,16 @@ pub const WINDOW_INNER_HEIGHT: u32 = 900;
 const BLOCK_COUNT: usize = 1024;
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone)]
 struct Vec4([f32; 4]);
+
+unsafe impl bytemuck::Zeroable for Vec4 {
+
+}
+
+unsafe impl bytemuck::Pod for Vec4 {
+
+}
 
 impl From<[f32; 4]> for Vec4 {
     fn from(the_vec: [f32; 4]) -> Self {
@@ -30,8 +43,16 @@ impl From<cgmath::Vector4<f32>> for Vec4 {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone)]
 struct Mat4([[f32; 4]; 4]);
+
+unsafe impl bytemuck::Zeroable for Mat4 {
+
+}
+
+unsafe impl bytemuck::Pod for Mat4 {
+
+}
 
 impl From<[[f32; 4]; 4]> for Mat4 {
     fn from(the_mat: [[f32; 4]; 4]) -> Self {
@@ -112,9 +133,17 @@ fn update_cam_buffer(cam: &Camera, cam_bind_group: &mut BindGroupSetThing<Camera
 
 // we are gonna use an ortho camera
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone)]
 struct CameraUniform {
     view_proj: Mat4,
+}
+
+unsafe impl bytemuck::Zeroable for CameraUniform {
+
+}
+
+unsafe impl bytemuck::Pod for CameraUniform {
+
 }
 
 // TODO: update camera uniform on resize
@@ -209,10 +238,18 @@ struct BindGroupSetThing<T> {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug)]
 struct Vertex {
     position: [f32; 3],
     tex_coords: [f32; 2],
+}
+
+unsafe impl bytemuck::Zeroable for Vertex {
+
+}
+
+unsafe impl bytemuck::Pod for Vertex {
+
 }
 
 impl Vertex {
@@ -269,7 +306,7 @@ pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    pub size: winit::dpi::PhysicalSize<u32>,
+    pub size: libs::winit::dpi::PhysicalSize<u32>,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
@@ -281,7 +318,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub async fn new(window: &winit::window::Window, game: &Game) -> Self {
+    pub async fn new(window: &libs::winit::window::Window, game: &Game) -> Self {
         let size = window.inner_size();
 
         // The instance is a handle to our GPU

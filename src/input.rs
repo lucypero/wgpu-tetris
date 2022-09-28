@@ -1,7 +1,9 @@
-use strum::EnumCount;
-use winit::event::{ElementState, KeyboardInput, VirtualKeyCode};
+// use 
+// use libs::winit;
 
-#[derive(EnumCount)]
+
+use libs::winit::event::{ElementState, KeyboardInput, VirtualKeyCode};
+
 pub enum Keys {
     W,
     A,
@@ -19,6 +21,7 @@ pub enum Keys {
     Up,
     Down,
 }
+const KEYS_COUNT: usize = 16;
 
 fn key_to_index(key: Keys) -> usize {
     match key {
@@ -41,15 +44,15 @@ fn key_to_index(key: Keys) -> usize {
 }
 
 pub struct Input {
-    keys_prev_frame: [bool; Keys::COUNT],
-    keys: [bool; Keys::COUNT],
+    keys_prev_frame: [bool; KEYS_COUNT],
+    keys: [bool; KEYS_COUNT],
 }
 
 impl Input {
     pub fn new() -> Self {
         Self {
-            keys_prev_frame: [false; Keys::COUNT],
-            keys: [false; Keys::COUNT],
+            keys_prev_frame: [false; KEYS_COUNT],
+            keys: [false; KEYS_COUNT],
         }
     }
 
