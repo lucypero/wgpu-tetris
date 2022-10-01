@@ -12,6 +12,7 @@ cgmath = "0.18.0"
 rand = "0.8.5"
 thunderdome = "0.5.1"
 tween = "1.0.1"
+freetype-sys = "0.16.0"
 
 [dependencies.image]
 version = "0.24.2"

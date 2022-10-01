@@ -34,3 +34,6 @@ pub mod image {
   pub use image::*;
 }
 
+pub mod freetype_sys {
+  pub use freetype_sys::*;
+}

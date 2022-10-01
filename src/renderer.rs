@@ -10,6 +10,8 @@ use libs::cgmath;
 use libs::winit;
 use libs::wgpu::{BindGroup, BindGroupLayout, BindingResource, Device, ShaderStages};
 use libs::wgpu::util::{DeviceExt};
+use libs::freetype_sys as ft;
+
 use crate::game::Camera;
 
 pub const WINDOW_INNER_WIDTH: u32 = 1000;
@@ -319,6 +321,33 @@ pub struct Renderer {
 
 impl Renderer {
     pub async fn new(window: &libs::winit::window::Window, game: &Game) -> Self {
+
+        //initializing freetype
+        unsafe {
+            let mut ft: ft::FT_Library = std::mem::zeroed();
+
+            let res = ft::FT_Init_FreeType(&mut ft);
+            if res != 0 {
+                panic!("freetype could not init");
+            }
+
+            println!("freetype initted well");
+
+            let mut face: ft::FT_Face = std::mem::zeroed();
+            let roboto_path = "fonts/Roboto-Regular.ttf\0".as_ptr() as *const i8;
+            let res = ft::FT_New_Face(ft, roboto_path, 0, &mut face);
+            if res != 0 {
+                panic!("could not load roboto");
+            }
+            println!("loaded roboto");
+
+            ft::FT_Set_Pixel_Sizes(face, 0, 48);  
+            let res = ft::FT_Load_Char(face, '\'' as u32, ft::FT_LOAD_RENDER);
+            if res != 0 {
+                panic!("could not load tilde");
+            }
+        }
+
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
