@@ -1,16 +1,16 @@
 extern crate core;
 
 use crate::{game, Game};
-use libs::cgmath::{Matrix4, Vector2, Vector3};
-use std::mem;
-use libs::wgpu;
-use libs::image;
 use libs::bytemuck;
 use libs::cgmath;
-use libs::winit;
-use libs::wgpu::{BindGroup, BindGroupLayout, BindingResource, Device, ShaderStages};
-use libs::wgpu::util::{DeviceExt};
+use libs::cgmath::{Matrix4, Vector2, Vector3};
 use libs::freetype_sys as ft;
+use libs::image;
+use libs::wgpu;
+use libs::wgpu::util::DeviceExt;
+use libs::wgpu::{BindGroup, BindGroupLayout, BindingResource, Device, ShaderStages};
+use libs::winit;
+use std::mem;
 
 use crate::game::Camera;
 
@@ -20,17 +20,20 @@ pub const WINDOW_INNER_HEIGHT: u32 = 900;
 //  In the game, there will always be less than this.
 const BLOCK_COUNT: usize = 1024;
 
+struct Character {
+    // @TODO(lucypero): add handle to texture
+    size: Vector2<i32>,
+    bearing: Vector2<i32>,
+    advance: u32,
+}
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 struct Vec4([f32; 4]);
 
-unsafe impl bytemuck::Zeroable for Vec4 {
+unsafe impl bytemuck::Zeroable for Vec4 {}
 
-}
-
-unsafe impl bytemuck::Pod for Vec4 {
-
-}
+unsafe impl bytemuck::Pod for Vec4 {}
 
 impl From<[f32; 4]> for Vec4 {
     fn from(the_vec: [f32; 4]) -> Self {
@@ -48,13 +51,9 @@ impl From<cgmath::Vector4<f32>> for Vec4 {
 #[derive(Debug, Copy, Clone)]
 struct Mat4([[f32; 4]; 4]);
 
-unsafe impl bytemuck::Zeroable for Mat4 {
+unsafe impl bytemuck::Zeroable for Mat4 {}
 
-}
-
-unsafe impl bytemuck::Pod for Mat4 {
-
-}
+unsafe impl bytemuck::Pod for Mat4 {}
 
 impl From<[[f32; 4]; 4]> for Mat4 {
     fn from(the_mat: [[f32; 4]; 4]) -> Self {
@@ -78,36 +77,42 @@ pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(
 
 // helpers
 fn build_storage_buffer_layout(device: &Device, stages: ShaderStages) -> BindGroupLayout {
-    device.create_bind_group_layout(
-        &wgpu::BindGroupLayoutDescriptor {
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: stages,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-            label: None,
-        })
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: stages,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+        label: None,
+    })
 }
 
-fn build_bind_group(device: &Device, layout: &BindGroupLayout, resource: BindingResource) -> BindGroup {
-    device.create_bind_group(
-        &wgpu::BindGroupDescriptor {
-            layout: &layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource
-            }],
-            label: None,
-        })
+fn build_bind_group(
+    device: &Device,
+    layout: &BindGroupLayout,
+    resource: BindingResource,
+) -> BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        layout: &layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource,
+        }],
+        label: None,
+    })
 }
 
 // Camera andy
-fn update_cam_buffer(cam: &Camera, cam_bind_group: &mut BindGroupSetThing<CameraUniform>, queue: &wgpu::Queue) {
+fn update_cam_buffer(
+    cam: &Camera,
+    cam_bind_group: &mut BindGroupSetThing<CameraUniform>,
+    queue: &wgpu::Queue,
+) {
     // write new matrix in the uniform
 
     // transformation
@@ -140,13 +145,9 @@ struct CameraUniform {
     view_proj: Mat4,
 }
 
-unsafe impl bytemuck::Zeroable for CameraUniform {
+unsafe impl bytemuck::Zeroable for CameraUniform {}
 
-}
-
-unsafe impl bytemuck::Pod for CameraUniform {
-
-}
+unsafe impl bytemuck::Pod for CameraUniform {}
 
 // TODO: update camera uniform on resize
 impl CameraUniform {
@@ -201,7 +202,7 @@ impl ModelUniform {
                 y: -game::BLOCK_SIZE,
                 z: 0.0,
             })
-                .into();
+            .into();
             model_vec.push(model.into());
         }
 
@@ -224,7 +225,7 @@ impl ColorUniform {
                 z: 1.0,
                 w: 1.0,
             }
-                .into();
+            .into();
             color_vec.push(color);
         }
 
@@ -246,13 +247,9 @@ struct Vertex {
     tex_coords: [f32; 2],
 }
 
-unsafe impl bytemuck::Zeroable for Vertex {
+unsafe impl bytemuck::Zeroable for Vertex {}
 
-}
-
-unsafe impl bytemuck::Pod for Vertex {
-
-}
+unsafe impl bytemuck::Pod for Vertex {}
 
 impl Vertex {
     fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
@@ -317,37 +314,12 @@ pub struct Renderer {
     model_uniform_set: BindGroupSetThing<ModelUniform>,
     color_uniform_set: BindGroupSetThing<ColorUniform>,
     diffuse_bind_group: wgpu::BindGroup,
+    //font testing
+    font_test_bind_group: wgpu::BindGroup,
 }
 
 impl Renderer {
     pub async fn new(window: &libs::winit::window::Window, game: &Game) -> Self {
-
-        //initializing freetype
-        unsafe {
-            let mut ft: ft::FT_Library = std::mem::zeroed();
-
-            let res = ft::FT_Init_FreeType(&mut ft);
-            if res != 0 {
-                panic!("freetype could not init");
-            }
-
-            println!("freetype initted well");
-
-            let mut face: ft::FT_Face = std::mem::zeroed();
-            let roboto_path = "fonts/Roboto-Regular.ttf\0".as_ptr() as *const i8;
-            let res = ft::FT_New_Face(ft, roboto_path, 0, &mut face);
-            if res != 0 {
-                panic!("could not load roboto");
-            }
-            println!("loaded roboto");
-
-            ft::FT_Set_Pixel_Sizes(face, 0, 48);  
-            let res = ft::FT_Load_Char(face, '\'' as u32, ft::FT_LOAD_RENDER);
-            if res != 0 {
-                panic!("could not load tilde");
-            }
-        }
-
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
@@ -365,15 +337,14 @@ impl Renderer {
             .await
             .unwrap();
 
+        let mut limits = wgpu::Limits::default();
+        limits.max_bind_groups = 5;
+
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     features: wgpu::Features::empty(),
-                    limits: if cfg!(target_arch = "wasm)") {
-                        wgpu::Limits::downlevel_webgl2_defaults()
-                    } else {
-                        wgpu::Limits::default()
-                    },
+                    limits,
                     label: None,
                 },
                 None,
@@ -409,8 +380,7 @@ impl Renderer {
         // -- bind descriptors --
 
         // we need an ortho camera
-        let camera_uniform =
-            CameraUniform::new(game.camera.initial_size);
+        let camera_uniform = CameraUniform::new(game.camera.initial_size);
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
             contents: bytemuck::cast_slice(&[camera_uniform]),
@@ -487,11 +457,8 @@ impl Renderer {
 
         let color_layout = build_storage_buffer_layout(&device, ShaderStages::FRAGMENT);
 
-        let color_bind_group = build_bind_group(
-            &device,
-            &color_layout,
-            color_buffer.as_entire_binding()
-        );
+        let color_bind_group =
+            build_bind_group(&device, &color_layout, color_buffer.as_entire_binding());
 
         let color_uniform_set = BindGroupSetThing {
             the_data: color_uniform,
@@ -540,8 +507,130 @@ impl Renderer {
             texture_size,
         );
 
-// We don't need to configure the texture view much, so let's
-// let wgpu define it.
+        //initializing freetype
+        let character_texture = unsafe {
+            let mut ft: ft::FT_Library = std::mem::zeroed();
+
+            let res = ft::FT_Init_FreeType(&mut ft);
+            if res != 0 {
+                panic!("freetype could not init");
+            }
+
+            println!("freetype initted well");
+
+            let mut face: ft::FT_Face = std::mem::zeroed();
+            let roboto_path = "fonts/Roboto-Regular.ttf\0".as_ptr() as *const i8;
+            let res = ft::FT_New_Face(ft, roboto_path, 0, &mut face);
+            if res != 0 {
+                panic!("could not load roboto");
+            }
+            println!("loaded roboto");
+
+            ft::FT_Set_Pixel_Sizes(face, 0, 48);
+            let res = ft::FT_Load_Char(face, 'a' as u32, ft::FT_LOAD_RENDER);
+            if res != 0 {
+                panic!("could not load tilde");
+            }
+
+            // @TODO(lucypero): render into a texture and put it into a Character then
+            //   store that in your rendering state
+
+            let char_w = (*(*face).glyph).bitmap.width as u32;
+            let char_h = (*(*face).glyph).bitmap.rows as u32;
+            let char_buffer = std::slice::from_raw_parts_mut(
+                (*(*face).glyph).bitmap.buffer,
+                (char_w * char_h) as usize,
+            );
+
+            println!("{:?}", char_buffer);
+
+            // creating and rendering texture
+            let texture_size = wgpu::Extent3d {
+                width: char_w,
+                height: char_h,
+                depth_or_array_layers: 1,
+            };
+            let character_texture = device.create_texture(&wgpu::TextureDescriptor {
+                size: texture_size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R8Unorm, // @TODO(lucypero): mayb u should change this. u only use 1 channel
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                label: None,
+            });
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &character_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &char_buffer, //change this. this is prob wrong idk..
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: std::num::NonZeroU32::new(char_w),
+                    rows_per_image: std::num::NonZeroU32::new(char_h),
+                },
+                texture_size,
+            );
+            character_texture
+        };
+
+        //all the wgpu nonsense
+
+        let character_texture_view =
+            character_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let character_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let font_test_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+                label: None,
+            });
+
+        let font_test_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &font_test_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&character_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&character_sampler),
+                },
+            ],
+            label: None,
+        });
+
+        // We don't need to configure the texture view much, so let's
+        // let wgpu define it.
         let diffuse_texture_view =
             diffuse_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let diffuse_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -570,8 +659,8 @@ impl Renderer {
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-// This should match the filterable field of the
-// corresponding Texture entry above.
+                        // This should match the filterable field of the
+                        // corresponding Texture entry above.
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
@@ -594,18 +683,19 @@ impl Renderer {
             label: Some("diffuse_bind_group"),
         });
 
-// -- bind group end --
+        // -- bind group end --
 
-// creating pipeline
+        // creating pipeline
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
-// THE ORDER HERE MATTERS !!!!
+                    // THE ORDER HERE MATTERS !!!!
                     &camera_uniform_set.layout,
                     &model_uniform_set.layout,
                     &color_uniform_set.layout,
                     &texture_bind_group_layout,
+                    &font_test_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -627,6 +717,7 @@ impl Renderer {
             camera_uniform_set,
             color_uniform_set,
             diffuse_bind_group,
+            font_test_bind_group,
         }
     }
 
@@ -766,6 +857,7 @@ impl Renderer {
             render_pass.set_bind_group(1, &self.model_uniform_set.bind_group, &[]);
             render_pass.set_bind_group(2, &self.color_uniform_set.bind_group, &[]);
             render_pass.set_bind_group(3, &self.diffuse_bind_group, &[]);
+            render_pass.set_bind_group(4, &self.font_test_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 

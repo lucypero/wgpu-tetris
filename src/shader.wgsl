@@ -46,12 +46,29 @@ var t_diffuse: texture_2d<f32>;
 @group(3) @binding(1)
 var s_diffuse: sampler;
 
+//testing font rendering (this is temporary)
+@group(4) @binding(0)
+var t_character: texture_2d<f32>;
+@group(4) @binding(1)
+var s_character: sampler;
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    // rendering the block (this is the real thing)
+
+    /*
+
     var t = textureSample(t_diffuse, s_diffuse, in.tex_coords).x;
     var the_tint = color_buf.color[in.inst_index].xyz;
-//    var the_tint = vec3(1.0,1.0,1.0);
 
     var res = mix(the_tint, vec3(t), abs(t - 0.5) * 2.0);
     return vec4(res, color_buf.color[in.inst_index].w);
+
+    */
+
+    // rendering font (testing)
+    var t = textureSample(t_character, s_character, in.tex_coords).r; // testing font
+    var the_tint = color_buf.color[in.inst_index].xyz;
+    return vec4(the_tint, t);
+
 }
