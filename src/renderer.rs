@@ -8,21 +8,25 @@ use libs::freetype_sys as ft;
 use libs::image;
 use libs::wgpu;
 use libs::wgpu::util::DeviceExt;
-use libs::wgpu::{BindGroup, BindGroupLayout, BindingResource, Device, ShaderStages};
+use libs::wgpu::{BindGroup, BindGroupLayout, BindingResource, Device, ShaderStages, TextureView};
 use libs::winit;
+use std::collections::HashMap;
 use std::mem;
 
 use crate::game::Camera;
 
 pub const WINDOW_INNER_WIDTH: u32 = 1000;
 pub const WINDOW_INNER_HEIGHT: u32 = 900;
+const MAX_CHARACTERS_ON_SCREEN: usize = 5000;
 // Fixed number of block instances in the instance renderer
 //  In the game, there will always be less than this.
 const BLOCK_COUNT: usize = 1024;
+const SAMPLE_STRING: &'static str = r#"test string"#;
 
+#[derive(Debug)]
 struct Character {
-    // @TODO(lucypero): add handle to texture
-    size: Vector2<i32>,
+    texture: TextureView,
+    size: Vector2<u32>,
     bearing: Vector2<i32>,
     advance: u32,
 }
@@ -32,7 +36,6 @@ struct Character {
 struct Vec4([f32; 4]);
 
 unsafe impl bytemuck::Zeroable for Vec4 {}
-
 unsafe impl bytemuck::Pod for Vec4 {}
 
 impl From<[f32; 4]> for Vec4 {
@@ -52,7 +55,6 @@ impl From<cgmath::Vector4<f32>> for Vec4 {
 struct Mat4([[f32; 4]; 4]);
 
 unsafe impl bytemuck::Zeroable for Mat4 {}
-
 unsafe impl bytemuck::Pod for Mat4 {}
 
 impl From<[[f32; 4]; 4]> for Mat4 {
@@ -88,6 +90,30 @@ fn build_storage_buffer_layout(device: &Device, stages: ShaderStages) -> BindGro
             },
             count: None,
         }],
+        label: None,
+    })
+}
+
+fn get_normal_texture_bind_group_layout(device: &Device) -> BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
         label: None,
     })
 }
@@ -146,7 +172,6 @@ struct CameraUniform {
 }
 
 unsafe impl bytemuck::Zeroable for CameraUniform {}
-
 unsafe impl bytemuck::Pod for CameraUniform {}
 
 // TODO: update camera uniform on resize
@@ -248,7 +273,6 @@ struct Vertex {
 }
 
 unsafe impl bytemuck::Zeroable for Vertex {}
-
 unsafe impl bytemuck::Pod for Vertex {}
 
 impl Vertex {
@@ -314,8 +338,12 @@ pub struct Renderer {
     model_uniform_set: BindGroupSetThing<ModelUniform>,
     color_uniform_set: BindGroupSetThing<ColorUniform>,
     diffuse_bind_group: wgpu::BindGroup,
-    //font testing
-    font_test_bind_group: wgpu::BindGroup,
+    //font rendering
+    text_pipeline: wgpu::RenderPipeline,
+    text_vertex_buffer: wgpu::Buffer,
+    text_sampler: wgpu::Sampler,
+    // @TODO(lucypero): do index buffer for text vertices later
+    char_map: HashMap<char, Character>,
 }
 
 impl Renderer {
@@ -508,7 +536,7 @@ impl Renderer {
         );
 
         //initializing freetype
-        let character_texture = unsafe {
+        let (char_map, text_sampler) = unsafe {
             let mut ft: ft::FT_Library = std::mem::zeroed();
 
             let res = ft::FT_Init_FreeType(&mut ft);
@@ -516,121 +544,108 @@ impl Renderer {
                 panic!("freetype could not init");
             }
 
-            println!("freetype initted well");
-
             let mut face: ft::FT_Face = std::mem::zeroed();
-            let roboto_path = "fonts/Roboto-Regular.ttf\0".as_ptr() as *const i8;
+            let roboto_path = "fonts/Roboto.ttf\0".as_ptr() as *const i8;
             let res = ft::FT_New_Face(ft, roboto_path, 0, &mut face);
             if res != 0 {
-                panic!("could not load roboto");
-            }
-            println!("loaded roboto");
-
-            ft::FT_Set_Pixel_Sizes(face, 0, 48);
-            let res = ft::FT_Load_Char(face, 'a' as u32, ft::FT_LOAD_RENDER);
-            if res != 0 {
-                panic!("could not load tilde");
+                panic!("could not load font");
             }
 
-            // @TODO(lucypero): render into a texture and put it into a Character then
-            //   store that in your rendering state
+            ft::FT_Set_Pixel_Sizes(face, 0, 22);
 
-            let char_w = (*(*face).glyph).bitmap.width as u32;
-            let char_h = (*(*face).glyph).bitmap.rows as u32;
-            let char_buffer = std::slice::from_raw_parts_mut(
-                (*(*face).glyph).bitmap.buffer,
-                (char_w * char_h) as usize,
-            );
+            // render all ascii
+            // 128 code points (0x20..0x7F).
+            let mut char_map = HashMap::with_capacity((0x20..0x7F).len());
+            for c in 0x20u8..0x7Fu8 {
+                let c = c as char;
+                if c == ' ' {
+                    continue;
+                }
 
-            println!("{:?}", char_buffer);
+                let res = ft::FT_Load_Char(face, c as u32, ft::FT_LOAD_RENDER);
+                if res != 0 {
+                    panic!("could not load {}", c);
+                }
 
-            // creating and rendering texture
-            let texture_size = wgpu::Extent3d {
-                width: char_w,
-                height: char_h,
-                depth_or_array_layers: 1,
-            };
-            let character_texture = device.create_texture(&wgpu::TextureDescriptor {
-                size: texture_size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R8Unorm, // @TODO(lucypero): mayb u should change this. u only use 1 channel
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                label: None,
+                let g = &(*(*face).glyph);
+                let char_w = g.bitmap.width as u32;
+                let char_h = g.bitmap.rows as u32;
+                let bearing = Vector2::new(g.bitmap_left, g.bitmap_top);
+                let advance = g.advance.x as u32;
+
+                let char_buffer =
+                    std::slice::from_raw_parts_mut(g.bitmap.buffer, (char_w * char_h) as usize);
+
+                // creating and rendering texture
+                let texture_size = wgpu::Extent3d {
+                    width: char_w,
+                    height: char_h,
+                    depth_or_array_layers: 1,
+                };
+                let character_texture = device.create_texture(&wgpu::TextureDescriptor {
+                    size: texture_size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    label: None,
+                });
+                queue.write_texture(
+                    wgpu::ImageCopyTexture {
+                        texture: &character_texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &char_buffer,
+                    wgpu::ImageDataLayout {
+                        offset: 0,
+                        bytes_per_row: std::num::NonZeroU32::new(char_w),
+                        rows_per_image: std::num::NonZeroU32::new(char_h),
+                    },
+                    texture_size,
+                );
+
+                // create the view
+                let character_texture_view =
+                    character_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+                char_map.insert(
+                    c,
+                    Character {
+                        texture: character_texture_view,
+                        size: Vector2::new(char_w, char_h),
+                        bearing,
+                        advance,
+                    },
+                );
+            }
+
+            let text_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
             });
-            queue.write_texture(
-                wgpu::ImageCopyTexture {
-                    texture: &character_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &char_buffer, //change this. this is prob wrong idk..
-                wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: std::num::NonZeroU32::new(char_w),
-                    rows_per_image: std::num::NonZeroU32::new(char_h),
-                },
-                texture_size,
-            );
-            character_texture
+            (char_map, text_sampler)
         };
 
-        //all the wgpu nonsense
+        // make the text vertex buffer
+        let zeroed_verts = vec![0_u8; 6 * std::mem::size_of::<Vertex>() * MAX_CHARACTERS_ON_SCREEN];
 
-        let character_texture_view =
-            character_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let character_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
+        //vertex buffer for text
+        let text_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("glyph vertex buffer"),
+            contents: &zeroed_verts,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
-        let font_test_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-                label: None,
-            });
+        // /font rendering stuff end
 
-        let font_test_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &font_test_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&character_texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&character_sampler),
-                },
-            ],
-            label: None,
-        });
-
-        // We don't need to configure the texture view much, so let's
-        // let wgpu define it.
         let diffuse_texture_view =
             diffuse_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let diffuse_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -643,33 +658,8 @@ impl Renderer {
             ..Default::default()
         });
 
-        let texture_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        // This should match the filterable field of the
-                        // corresponding Texture entry above.
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-                label: Some("texture_bind_group_layout"),
-            });
-
         let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &texture_bind_group_layout,
+            layout: &get_normal_texture_bind_group_layout(&device),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -694,14 +684,40 @@ impl Renderer {
                     &camera_uniform_set.layout,
                     &model_uniform_set.layout,
                     &color_uniform_set.layout,
-                    &texture_bind_group_layout,
-                    &font_test_bind_group_layout,
+                    &get_normal_texture_bind_group_layout(&device),
                 ],
                 push_constant_ranges: &[],
             });
 
-        let render_pipeline =
-            Self::create_pipeline(&device, &config, &shader, &render_pipeline_layout);
+        let render_pipeline = Self::create_pipeline(
+            &device,
+            &config,
+            &shader,
+            &render_pipeline_layout,
+            "main pipeline",
+        );
+
+        // TEXT PIPELINE!!!! yay
+        let text_pipeline = {
+            let text_shader = device.create_shader_module(wgpu::include_wgsl!("text.wgsl"));
+
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[
+                    &camera_uniform_set.layout,
+                    &get_normal_texture_bind_group_layout(&device),
+                ],
+                push_constant_ranges: &[],
+            });
+
+            Self::create_pipeline(
+                &device,
+                &config,
+                &text_shader,
+                &pipeline_layout,
+                "text pipeline",
+            )
+        };
 
         Self {
             surface,
@@ -710,6 +726,7 @@ impl Renderer {
             config,
             size,
             render_pipeline,
+            text_pipeline,
             vertex_buffer,
             index_buffer,
             num_indices,
@@ -717,7 +734,10 @@ impl Renderer {
             camera_uniform_set,
             color_uniform_set,
             diffuse_bind_group,
-            font_test_bind_group,
+            //font stuff start
+            char_map,
+            text_vertex_buffer,
+            text_sampler,
         }
     }
 
@@ -726,9 +746,10 @@ impl Renderer {
         config: &wgpu::SurfaceConfiguration,
         shader: &wgpu::ShaderModule,
         render_pipeline_layout: &wgpu::PipelineLayout,
+        name: &str,
     ) -> wgpu::RenderPipeline {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
+            label: Some(name),
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -773,6 +794,11 @@ impl Renderer {
     }
 
     pub fn render(&mut self, game: &Game) -> Result<(), wgpu::SurfaceError> {
+        // bind groups for font rendering
+        let characters_to_draw_len = SAMPLE_STRING.chars().filter(|c| *c != ' ').count();
+
+        let mut char_bind_groups: Vec<wgpu::BindGroup> = Vec::with_capacity(characters_to_draw_len);
+
         // update all the buffers
         {
             //updating camera
@@ -818,6 +844,88 @@ impl Renderer {
                 0,
                 bytemuck::cast_slice(self.color_uniform_set.the_data.color.as_slice()),
             );
+
+            //updating text vertex buffer
+
+            // making all the vertices
+
+            const STRING_START_X: f32 = 20.0;
+            const STRING_START_Y: f32 = 20.0;
+
+            let mut string_x = STRING_START_X; // the start x pos
+            let mut string_y = STRING_START_Y; // the start y pos
+
+            let mut vertices: Vec<Vertex> = Vec::with_capacity(6 * characters_to_draw_len);
+
+            for c in SAMPLE_STRING.chars() {
+                if c == ' ' {
+                    string_x += 10.0;
+                    continue;
+                }
+
+                //inserting line breaks
+                if string_x > WINDOW_INNER_HEIGHT as f32 {
+                    string_x = STRING_START_X;
+                    //adding line_height
+                    string_y += 22.0;
+                }
+
+                let char_info = self.char_map.get(&c).unwrap();
+
+                let xpos: f32 = string_x + char_info.bearing.x as f32;
+                let ypos: f32 = string_y + char_info.size.y as f32 - char_info.bearing.y as f32;
+                let w: f32 = char_info.size.x as f32;
+                let h: f32 = char_info.size.y as f32;
+
+                vertices.push(Vertex {
+                    position: [xpos, ypos - h, 0.0],
+                    tex_coords: [0.0, 0.0],
+                });
+                vertices.push(Vertex {
+                    position: [xpos, ypos, 0.0],
+                    tex_coords: [0.0, 1.0],
+                });
+                vertices.push(Vertex {
+                    position: [xpos + w, ypos, 0.0],
+                    tex_coords: [1.0, 1.0],
+                });
+                vertices.push(Vertex {
+                    position: [xpos, ypos - h, 0.0],
+                    tex_coords: [0.0, 0.0],
+                });
+                vertices.push(Vertex {
+                    position: [xpos + w, ypos, 0.0],
+                    tex_coords: [1.0, 1.0],
+                });
+                vertices.push(Vertex {
+                    position: [xpos + w, ypos - h, 0.0],
+                    tex_coords: [1.0, 0.0],
+                });
+                string_x += (char_info.advance >> 6) as f32;
+
+                // making char bind groups
+
+                char_bind_groups.push(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    layout: &get_normal_texture_bind_group_layout(&self.device),
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&char_info.texture),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&self.text_sampler),
+                        },
+                    ],
+                    label: None,
+                }));
+            }
+
+            self.queue.write_buffer(
+                &self.text_vertex_buffer,
+                0,
+                bytemuck::cast_slice(vertices.as_slice()),
+            );
         }
 
         // do the render
@@ -857,11 +965,20 @@ impl Renderer {
             render_pass.set_bind_group(1, &self.model_uniform_set.bind_group, &[]);
             render_pass.set_bind_group(2, &self.color_uniform_set.bind_group, &[]);
             render_pass.set_bind_group(3, &self.diffuse_bind_group, &[]);
-            render_pass.set_bind_group(4, &self.font_test_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 
             render_pass.draw_indexed(0..self.num_indices, 0, 0..game.blocks.len() as _);
+
+            // text rendering
+            render_pass.set_pipeline(&self.text_pipeline);
+            render_pass.set_bind_group(0, &self.camera_uniform_set.bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.text_vertex_buffer.slice(..));
+
+            for i in 0..characters_to_draw_len {
+                render_pass.set_bind_group(1, &char_bind_groups[i], &[]);
+                render_pass.draw(i as u32 * 6..i as u32 * 6 + 6, 0..1);
+            }
         }
 
         // submit will accept anything that implements IntoIter
