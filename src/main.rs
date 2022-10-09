@@ -25,7 +25,6 @@ mod renderer;
 
 use crate::game::Game;
 use crate::input::Input;
-use crate::renderer::Renderer;
 use std::time::Instant;
 
 use libs::cgmath::Vector2;
@@ -61,7 +60,7 @@ pub async fn run() {
 
     let mut input = Input::new();
     let mut game = Game::new(Vector2::new(inner_size.width, inner_size.height));
-    let mut renderer = Renderer::new(&window, &game).await;
+    let mut renderer = renderer::init_renderer(&window, &game).await;
 
     let mut now = Instant::now();
 
@@ -79,10 +78,10 @@ pub async fn run() {
                 input.process_key_event(kb_input);
             }
             WindowEvent::Resized(physical_size) => {
-                renderer.resize(*physical_size);
+                renderer::resize(&mut renderer, *physical_size);
             }
             WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                renderer.resize(**new_inner_size);
+                renderer::resize(&mut renderer, **new_inner_size);
             }
             _ => {}
         },
@@ -90,10 +89,13 @@ pub async fn run() {
             game.update(&input, now.elapsed());
             now = Instant::now();
             input.save_snapshot();
-            match renderer.render(&game) {
+            match renderer::render(&mut renderer, &game) {
                 Ok(_) => {}
                 // Reconfigure the surface if lost
-                Err(wgpu::SurfaceError::Lost) => renderer.resize(renderer.size),
+                Err(wgpu::SurfaceError::Lost) => {
+                    let new_size = renderer.ctx.size;
+                    renderer::resize(&mut renderer, new_size);
+                }
                 // The system is out of memory, we should probably quit
                 Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
                 // All other errors (Outdated, Timeout) should be resolved by the next frame

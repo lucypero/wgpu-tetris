@@ -3,6 +3,24 @@ Font rendering todo:
 - make an index buffer and render indexed (that makes it go faster i think)
 
 
+GUI calling api (maybe):
+
+// menu will be a vertical list of buttons (boxes with text) 
+//      and optionally a header
+GUI::draw_menu() 
+  .centered()
+  .pos(vec2::new(20.0,20.0))
+  .header("WGPU tetris")
+  .button("Play")
+  .button("Info")
+  .button("Credits")
+  .select(selected_button) //selected_button is gonna be where the "cursor" is on the menu (controller or mouse pointer)
+  .on_button_click(|index| {
+      println!("you clicked the button number {index}");
+  })
+  .build()
+
+
 ------- this below is old ------------
 
 
@@ -31,3 +49,23 @@ shuffle the list when index == 0 and index = (index + 1) % piece_types.length ea
 every next piece you generate will just be the next in the list
 and each time you reach the end of the list, you reset the index to 0 and re-shuffle
 so that next time you iterate over the list it will be random again
+
+
+rectangles with border - shader:
+
+frag shader:
+
+    var border_width = 0.1; // this is a uniform
+    var aspect = 1.0; // this is a uniform
+
+    var maxX = 1.0 - border_width;
+    var minX = border_width;
+    var maxY = maxX / aspect;
+    var minY = minX / aspect;
+
+    if (in.tex_coords.x < maxX && in.tex_coords.x > minX &&
+        in.tex_coords.y < maxY && in.tex_coords.y > minY) {
+        return vec4(0.0, 0.0, 0.0, 0.0);
+    } else {
+        return vec4(1.0, 0.0, 0.0, 1.0);
+    }
