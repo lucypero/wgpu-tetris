@@ -4,25 +4,6 @@ mod game;
 mod input;
 mod renderer;
 
-// self.do_block_controls($b) ==>> do_block_controls(&mut self, $b)
-
-// self.do_block_controls(&input);
-
-// pub struct Game {
-//     pub blocks: Arena<Block>,
-//     active_block_set: Option<BlockSet>,
-//     hold_block_preview: Option<StaticBlockSet>,
-//     pub grid: Grid,
-//     tick_timer: Duration,
-//     pub camera: Camera,
-//     hold_enabled: bool,
-//     next_blocks: VecDeque<StaticBlockSet>,
-//     next_block_types: Vec<BlockSetType>,
-//     next_block_index: usize,
-//     rng: rand::rngs::ThreadRng,
-// }
-
-
 use crate::game::Game;
 use crate::input::Input;
 use std::time::Instant;
@@ -36,13 +17,7 @@ use libs::winit::{
     window::WindowBuilder,
 };
 
-// foo($a, $b) ==>> foo($b, $a)
-
 fn main() {
-    libs::pollster::block_on(run());
-}
-
-pub async fn run() {
     let event_loop = EventLoop::new();
 
     let inner_size = winit::dpi::PhysicalSize {
@@ -60,7 +35,7 @@ pub async fn run() {
 
     let mut input = Input::new();
     let mut game = Game::new(Vector2::new(inner_size.width, inner_size.height));
-    let mut renderer = renderer::init_renderer(&window, &game).await;
+    let mut renderer = renderer::init_renderer(&window, &game);
 
     let mut now = Instant::now();
 

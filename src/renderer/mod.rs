@@ -237,31 +237,6 @@ impl CameraUniform {
     }
 }
 
-struct ModelUniform {
-    model: Vec<Mat4>,
-}
-
-impl ModelUniform {
-    fn new() -> Self {
-        let mut model_vec: Vec<Mat4> = Vec::with_capacity(BLOCK_COUNT);
-
-        for _ in 0..BLOCK_COUNT {
-            let model: [[f32; 4]; 4] = Matrix4::from_translation(Vector3 {
-                x: -game::BLOCK_SIZE,
-                y: -game::BLOCK_SIZE,
-                z: 0.0,
-            })
-            .into();
-            model_vec.push(model.into());
-        }
-
-        Self { model: model_vec }
-    }
-}
-
-#[repr(transparent)]
-struct ColorUniforms(Vec<Vec4>);
-
 struct BindGroupSetThing<T> {
     the_data: T,
     buffer: wgpu::Buffer,
@@ -340,6 +315,10 @@ struct BorderedRectsRenderer {
     pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     rects: Vec<BorderedRect>,
+    border_color_buffer: BindGroupSetThing<Vec<Vec4>>,
+    fill_color_buffer: BindGroupSetThing<Vec<Vec4>>,
+    aspect_ratio_buffer: BindGroupSetThing<Vec<f32>>,
+    border_width_buffer: BindGroupSetThing<Vec<f32>>,
 }
 
 pub struct WgpuContext {
@@ -355,8 +334,8 @@ struct BlockRenderer {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
-    model_uniform_set: BindGroupSetThing<ModelUniform>,
-    color_uniform_set: BindGroupSetThing<ColorUniforms>,
+    model_uniform_set: BindGroupSetThing<Vec<Mat4>>,
+    color_uniform_set: BindGroupSetThing<Vec<Vec4>>,
     block_texture_bg: wgpu::BindGroup,
 }
 
@@ -365,7 +344,7 @@ pub struct Renderer {
     camera: BindGroupSetThing<CameraUniform>,
     block_renderer: BlockRenderer,
     text_renderer: font_renderer::TextRenderer,
-    // pub bordered_rects_renderer: BorderedRectsRenderer,
+    bordered_rects_renderer: BorderedRectsRenderer,
 }
 
 fn init_block_renderer(
@@ -374,85 +353,13 @@ fn init_block_renderer(
     camera_layout: &BindGroupLayout,
     surface_config: &SurfaceConfiguration,
 ) -> BlockRenderer {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/shader.wgsl"));
-
-    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Vertex Buffer"),
-        contents: bytemuck::cast_slice(VERTICES),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
-
-    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Index Buffer"),
-        contents: bytemuck::cast_slice(INDICES),
-        usage: wgpu::BufferUsages::INDEX,
-    });
-
     let num_indices = INDICES.len() as u32;
 
-    // we need a model matrix and color
-
-    // model matrix : we need to create the buffer and the bind group
-    // this is the instance data for the tetris blocks
-
-    let model_uniform = ModelUniform::new();
-
-    let model_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("model matrix buffer"),
-        contents: bytemuck::cast_slice(model_uniform.model.as_slice()),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    });
-
-    let model_bind_group_layout = build_storage_buffer_layout(&device, ShaderStages::VERTEX);
-
-    let model_bind_group = build_bind_group(
-        &device,
-        &model_bind_group_layout,
-        model_buffer.as_entire_binding(),
-    );
-
-    let model_uniform_set = BindGroupSetThing {
-        the_data: model_uniform,
-        buffer: model_buffer,
-        layout: model_bind_group_layout,
-        bind_group: model_bind_group,
-    };
+    // Model matrix buffer
+    let model_uniform_set = new_storage_buffer::<Mat4>(device, BLOCK_COUNT, ShaderStages::VERTEX);
 
     // Block Color buffer
-    let color_uniform_set = {
-        let mut color_vec = Vec::with_capacity(BLOCK_COUNT);
-
-        for _ in 0..BLOCK_COUNT {
-            let color: Vec4 = cgmath::Vector4 {
-                x: 1.0,
-                y: 1.0,
-                z: 1.0,
-                w: 1.0,
-            }
-            .into();
-            color_vec.push(color);
-        }
-
-        let color_uniform = ColorUniforms(color_vec);
-
-        let color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("color buffer"),
-            contents: bytemuck::cast_slice(color_uniform.0.as_slice()),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let color_layout = build_storage_buffer_layout(&device, ShaderStages::FRAGMENT);
-
-        let color_bind_group =
-            build_bind_group(&device, &color_layout, color_buffer.as_entire_binding());
-
-        BindGroupSetThing {
-            the_data: color_uniform,
-            buffer: color_buffer,
-            layout: color_layout,
-            bind_group: color_bind_group,
-        }
-    };
+    let color_uniform_set = new_storage_buffer::<Vec4>(device, BLOCK_COUNT, ShaderStages::FRAGMENT);
 
     let block_texture_bg = {
         // making block texture
@@ -524,26 +431,43 @@ fn init_block_renderer(
         })
     };
 
-    // creating pipeline
-    let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("Render Pipeline Layout"),
-        bind_group_layouts: &[
-            // THE ORDER HERE MATTERS !!!!
-            camera_layout,
-            &model_uniform_set.layout,
-            &color_uniform_set.layout,
-            &get_normal_texture_bind_group_layout(&device),
-        ],
-        push_constant_ranges: &[],
+    // Creating pipeline stuff
+
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Vertex Buffer"),
+        contents: bytemuck::cast_slice(VERTICES),
+        usage: wgpu::BufferUsages::VERTEX,
     });
 
-    let render_pipeline = create_pipeline(
-        &device,
-        &surface_config,
-        &shader,
-        &render_pipeline_layout,
-        "main pipeline",
-    );
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Index Buffer"),
+        contents: bytemuck::cast_slice(INDICES),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+
+    let render_pipeline = {
+        let render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Render Pipeline Layout"),
+                bind_group_layouts: &[
+                    // THE ORDER HERE MATTERS !!!!
+                    camera_layout,
+                    &model_uniform_set.layout,
+                    &color_uniform_set.layout,
+                    &get_normal_texture_bind_group_layout(&device),
+                ],
+                push_constant_ranges: &[],
+            });
+
+        let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/shader.wgsl"));
+        create_pipeline(
+            &device,
+            &surface_config,
+            &shader,
+            &render_pipeline_layout,
+            "main pipeline",
+        )
+    };
 
     BlockRenderer {
         render_pipeline,
@@ -572,7 +496,8 @@ fn init_wgpu_context(window: &libs::winit::window::Window) -> WgpuContext {
     }))
     .unwrap();
 
-    let limits = wgpu::Limits::default();
+    let mut limits = wgpu::Limits::default();
+    limits.max_bind_groups = 8;
 
     let (device, queue) = block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
@@ -602,7 +527,133 @@ fn init_wgpu_context(window: &libs::winit::window::Window) -> WgpuContext {
     }
 }
 
-pub async fn init_renderer(window: &libs::winit::window::Window, game: &Game) -> Renderer {
+/// draws semi transparent rect with cute pinki border
+fn new_bordered_rect(pos: Vector2<f32>, extents: Vector2<f32>) -> BorderedRect {
+    BorderedRect {
+        pos,
+        extents,
+        border_width: 5.0,
+        border_color: Vector4::new(1.0, 0.459, 0.918, 1.0),
+        fill_color: Vector4::new(1.0, 1.0, 1.0, 0.2),
+    }
+}
+
+/// Builds a storage buffer and associated bind group
+/// Given a size and shader stages
+/// size: number of T that the buffer can hold
+/// stages: the shader stages where the buffer can be accessed from
+fn new_storage_buffer<T>(
+    device: &Device,
+    size: usize,
+    stages: ShaderStages,
+) -> BindGroupSetThing<Vec<T>> {
+    let zeroed_vec = vec![0_u8; std::mem::size_of::<T>() * size];
+
+    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: None,
+        contents: &zeroed_vec,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    });
+
+    let layout = build_storage_buffer_layout(&device, stages);
+
+    let bind_group = build_bind_group(&device, &layout, buffer.as_entire_binding());
+
+    BindGroupSetThing {
+        the_data: Vec::<T>::with_capacity(size),
+        buffer,
+        layout,
+        bind_group,
+    }
+}
+
+fn init_bordered_rect_renderer(
+    device: &Device,
+    queue: &Queue,
+    camera_layout: &BindGroupLayout,
+    surface_config: &SurfaceConfiguration,
+) -> BorderedRectsRenderer {
+    // storage buffers for fragment shader
+    let border_color_buffer =
+        new_storage_buffer::<Vec4>(device, BLOCK_COUNT, ShaderStages::FRAGMENT);
+    let fill_color_buffer = new_storage_buffer::<Vec4>(device, BLOCK_COUNT, ShaderStages::FRAGMENT);
+    let aspect_ratio_buffer =
+        new_storage_buffer::<f32>(device, BLOCK_COUNT, ShaderStages::FRAGMENT);
+    let border_width_buffer =
+        new_storage_buffer::<f32>(device, BLOCK_COUNT, ShaderStages::FRAGMENT);
+
+    // @TODO(lucypero): do the vertices like u did with text
+    // @TODO(lucypero): mayb an index buffer
+
+    let zeroed_verts = vec![0_u8; 6 * std::mem::size_of::<Vertex>() * BLOCK_COUNT];
+
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: None,
+        contents: &zeroed_verts,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+    });
+
+    // @TODO(lucypero): do some test bordered rects and write the vertices
+
+    // making pipeline
+    let pipeline = {
+        let render_pipeline_layout =
+            // @TODO(lucypero): the layouts are not done yet
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[
+                    // THE ORDER HERE MATTERS !!!!
+                    camera_layout,
+                    &border_color_buffer.layout,
+                    &fill_color_buffer.layout,
+                    &aspect_ratio_buffer.layout,
+                    &border_width_buffer.layout,
+                ],
+                push_constant_ranges: &[],
+            });
+
+        let shader =
+            device.create_shader_module(wgpu::include_wgsl!("shaders/bordered_block.wgsl"));
+
+        create_pipeline(
+            &device,
+            &surface_config,
+            &shader,
+            &render_pipeline_layout,
+            "main pipeline",
+        )
+    };
+
+    let mut rects: Vec<BorderedRect> = Vec::with_capacity(20);
+    rects.push(new_bordered_rect(
+        Vector2::new(20.0, 200.0),
+        Vector2::new(50.0, 100.0),
+    ));
+    rects.push(new_bordered_rect(
+        Vector2::new(200.0, 200.0),
+        Vector2::new(50.0, 150.0),
+    ));
+    rects.push(new_bordered_rect(
+        Vector2::new(20.0, 600.0),
+        Vector2::new(150.0, 50.0),
+    ));
+    rects.push(new_bordered_rect(
+        Vector2::new(600.0, 600.0),
+        Vector2::new(200.0, 100.0),
+    ));
+
+    BorderedRectsRenderer {
+        pipeline,
+        vertex_buffer,
+        rects,
+        border_color_buffer,
+        fill_color_buffer,
+        aspect_ratio_buffer,
+        border_width_buffer,
+    }
+}
+
+pub fn init_renderer(window: &libs::winit::window::Window, game: &Game) -> Renderer {
     // making blocks pipeline
     let ctx = init_wgpu_context(window);
     let device = &ctx.device;
@@ -642,19 +693,15 @@ pub async fn init_renderer(window: &libs::winit::window::Window, game: &Game) ->
     let text_renderer = font_renderer::init_text_renderer(device, queue, &ctx.surface_config);
     text_renderer.update_vertices(queue);
 
-    // // bordered rects renderer init
-    // let bordered_rects_renderer = {
-    //     BorderedRectsRenderer {
-    //         //[...]
-    //     }
-    // };
+    let bordered_rects_renderer =
+        init_bordered_rect_renderer(device, queue, &camera.layout, &ctx.surface_config);
 
     Renderer {
         ctx,
         camera,
         block_renderer,
         text_renderer,
-        // bordered_rects_renderer,
+        bordered_rects_renderer,
     }
 }
 
@@ -667,7 +714,6 @@ pub fn render(renderer: &mut Renderer, game: &Game) -> Result<(), wgpu::SurfaceE
 
     // Updating Camera
     {
-
         // write new matrix in the uniform
         let cam = &game.camera;
 
@@ -694,22 +740,26 @@ pub fn render(renderer: &mut Renderer, game: &Game) -> Result<(), wgpu::SurfaceE
         );
     }
 
-    // update block model matrices
-    for (the_mat, (_, block)) in renderer
-        .block_renderer
-        .model_uniform_set
-        .the_data
-        .model
-        .iter_mut()
-        .take(game.blocks.len())
-        .zip(game.blocks.iter())
-    {
+    // updating block buffers: transformation matrix and color buffers
+    renderer.block_renderer.model_uniform_set.the_data.clear();
+    renderer.block_renderer.color_uniform_set.the_data.clear();
+
+    for (_, block) in game.blocks.iter() {
         let new_mat = Matrix4::from_translation(Vector3 {
             x: block.pos.x,
             y: block.pos.y,
             z: 0.0,
         });
-        the_mat.0 = new_mat.into();
+        renderer
+            .block_renderer
+            .model_uniform_set
+            .the_data
+            .push(new_mat.into());
+        renderer
+            .block_renderer
+            .color_uniform_set
+            .the_data
+            .push(block.color.into());
     }
 
     queue.write_buffer(
@@ -720,23 +770,9 @@ pub fn render(renderer: &mut Renderer, game: &Game) -> Result<(), wgpu::SurfaceE
                 .block_renderer
                 .model_uniform_set
                 .the_data
-                .model
                 .as_slice(),
         ),
     );
-
-    //updating block colors
-    for (color_mat, (_, block)) in renderer
-        .block_renderer
-        .color_uniform_set
-        .the_data
-        .0
-        .iter_mut()
-        .take(game.blocks.len())
-        .zip(game.blocks.iter())
-    {
-        color_mat.0 = block.color.into();
-    }
 
     queue.write_buffer(
         &renderer.block_renderer.color_uniform_set.buffer,
@@ -746,9 +782,101 @@ pub fn render(renderer: &mut Renderer, game: &Game) -> Result<(), wgpu::SurfaceE
                 .block_renderer
                 .color_uniform_set
                 .the_data
-                .0
                 .as_slice(),
         ),
+    );
+
+    let border_renderer = &mut renderer.bordered_rects_renderer;
+
+    // writing bordered rect vertex buffer
+    {
+        let mut vertices: Vec<Vertex> = Vec::with_capacity(6 * border_renderer.rects.len());
+
+
+        for block in border_renderer.rects.iter() {
+
+            let xpos = block.pos.x;
+            let ypos = block.pos.y;
+            let w = block.extents.x;
+            let h = block.extents.y;
+
+            vertices.push(Vertex {
+                position: [xpos, ypos - h, 0.0],
+                tex_coords: [0.0, 0.0],
+            });
+            vertices.push(Vertex {
+                position: [xpos, ypos, 0.0],
+                tex_coords: [0.0, 1.0],
+            });
+            vertices.push(Vertex {
+                position: [xpos + w, ypos, 0.0],
+                tex_coords: [1.0, 1.0],
+            });
+            vertices.push(Vertex {
+                position: [xpos, ypos - h, 0.0],
+                tex_coords: [0.0, 0.0],
+            });
+            vertices.push(Vertex {
+                position: [xpos + w, ypos, 0.0],
+                tex_coords: [1.0, 1.0],
+            });
+            vertices.push(Vertex {
+                position: [xpos + w, ypos - h, 0.0],
+                tex_coords: [1.0, 0.0],
+            });
+        }
+
+        queue.write_buffer(
+            &border_renderer.vertex_buffer,
+            0,
+            bytemuck::cast_slice(vertices.as_slice()),
+        );
+    }
+
+    // writing to all bordered rect buffers
+    border_renderer.border_color_buffer.the_data.clear();
+    border_renderer.fill_color_buffer.the_data.clear();
+    border_renderer.aspect_ratio_buffer.the_data.clear();
+    border_renderer.border_width_buffer.the_data.clear();
+
+    for rect in border_renderer.rects.iter() {
+        border_renderer
+            .border_color_buffer
+            .the_data
+            .push(rect.border_color.into());
+        border_renderer
+            .fill_color_buffer
+            .the_data
+            .push(rect.fill_color.into());
+        border_renderer
+            .border_width_buffer
+            .the_data
+            .push(rect.border_width / rect.extents.x);
+        border_renderer
+            .aspect_ratio_buffer
+            .the_data
+            .push(rect.extents.x / rect.extents.y);
+    }
+
+    queue.write_buffer(
+        &border_renderer.border_color_buffer.buffer,
+        0,
+        bytemuck::cast_slice(border_renderer.border_color_buffer.the_data.as_slice()),
+    );
+    queue.write_buffer(
+        &border_renderer.fill_color_buffer.buffer,
+        0,
+        bytemuck::cast_slice(border_renderer.fill_color_buffer.the_data.as_slice()),
+    );
+    queue.write_buffer(
+        &border_renderer.aspect_ratio_buffer.buffer,
+        0,
+        bytemuck::cast_slice(border_renderer.aspect_ratio_buffer.the_data.as_slice()),
+    );
+    queue.write_buffer(
+        &border_renderer.border_width_buffer.buffer,
+        0,
+        bytemuck::cast_slice(border_renderer.border_width_buffer.the_data.as_slice()),
     );
 
     // Render pass
@@ -808,16 +936,33 @@ pub fn render(renderer: &mut Renderer, game: &Game) -> Result<(), wgpu::SurfaceE
 
             // @NOTE(lucypero): working with text for now, the tetris was distracting
             //   uncomment this to see tetris blocks
-            render_pass.draw_indexed(0..renderer.block_renderer.num_indices, 0, 0..game.blocks.len() as _);
+            render_pass.draw_indexed(
+                0..renderer.block_renderer.num_indices,
+                0,
+                0..game.blocks.len() as _,
+            );
         }
 
         // Rendering text
-        renderer.text_renderer.render(&mut render_pass, &renderer.camera.bind_group);
+        renderer
+            .text_renderer
+            .render(&mut render_pass, &renderer.camera.bind_group);
 
-        // // Rendering bordered rectangles
-        // render_bordered_rectangles(
+        // Rendering bordered rectangles
+        let border_renderer = &renderer.bordered_rects_renderer;
+        render_pass.set_pipeline(&border_renderer.pipeline);
+        render_pass.set_bind_group(0, &renderer.camera.bind_group, &[]);
+        render_pass.set_bind_group(1, &border_renderer.border_color_buffer.bind_group, &[]);
+        render_pass.set_bind_group(2, &border_renderer.fill_color_buffer.bind_group, &[]);
+        render_pass.set_bind_group(3, &border_renderer.aspect_ratio_buffer.bind_group, &[]);
+        render_pass.set_bind_group(4, &border_renderer.border_width_buffer.bind_group, &[]);
+        render_pass.set_vertex_buffer(0, border_renderer.vertex_buffer.slice(..));
 
-        // );
+        // @TODO(lucypero): fuck how do i do this..
+        // so i have all verts in a buffer so should b able to draw all that in 1 draw call i think
+        // but then how do index all the buffers
+        // damn i am not sure
+        render_pass.draw(0..border_renderer.rects.len() as u32 * 6, 0..1);
     }
 
     // submit will accept anything that implements IntoIter
