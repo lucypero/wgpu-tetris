@@ -1177,12 +1177,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tween"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63e9aab86b1958c0ff7f3d18d04abd6d8e583d237f92e88191ce5c7bf481c5ec"
-
-[[package]]
 name = "unicode-ident"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1418,7 +1412,6 @@ dependencies = [
  "pollster",
  "rand",
  "thunderdome",
- "tween",
  "wgpu",
  "winit",
 ]

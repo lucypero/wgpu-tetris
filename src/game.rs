@@ -4,32 +4,26 @@ use libs::cgmath::{Vector2, Vector3, Vector4};
 use libs::rand;
 use libs::rand::seq::SliceRandom;
 use libs::thunderdome::{Arena, Index};
-use libs::tween::{CircOut, Tweener};
 use std::collections::{HashMap, VecDeque};
 use std::mem::transmute;
 use std::time::Duration;
-
-// (0,0) is bottom left (of grid)
-type Pos = Vector2<i32>;
-type Vec2 = Vector2<f32>;
-type Vec4 = Vector4<f32>;
-type TweenUsed = CircOut<f32, i64>;
-type MyTween = Tweener<TweenUsed>;
-
-pub const BLOCK_SIZE: f32 = 32.0;
-pub const GRID_WIDTH: usize = 10;
-pub const GRID_HEIGHT: usize = 20;
-
-const ACTIVE_BLOCK_START_POS: Pos = Pos::new(3, 20);
-const HOLD_BLOCK_POS: Vec2 = Vec2::new(30.0, BLOCK_SIZE * 10.0);
-const NEXT_BLOCKS_COUNT: usize = 5;
-const FIRST_BLOCK_POS_Y: f32 = 250.0;
+use std::ops::{Mul, Add};
 
 pub type v2 = Vector2<f32>;
 pub type v4 = Vector4<f32>;
 pub type v2i = Vector2<i32>;
 pub type v3 = Vector3<f32>;
 pub type v3i = Vector3<i32>;
+
+// (0,0) is bottom left (of grid)
+pub const BLOCK_SIZE: f32 = 32.0;
+pub const GRID_WIDTH: usize = 10;
+pub const GRID_HEIGHT: usize = 20;
+
+const ACTIVE_BLOCK_START_POS: v2i = v2i::new(3, 20);
+const HOLD_BLOCK_POS: v2 = v2::new(30.0, BLOCK_SIZE * 10.0);
+const NEXT_BLOCKS_COUNT: usize = 5;
+const FIRST_BLOCK_POS_Y: f32 = 250.0;
 
 pub fn foo(a: i32, b: i32) -> i32 {
     a + b
@@ -48,6 +42,7 @@ enum BlockSetType {
 const BLOCK_COUNT: usize = 8;
 
 #[repr(u32)]
+#[derive(Clone,Copy)]
 pub enum EaseFunction {
     Linear,
     CircOut,
@@ -56,9 +51,10 @@ pub enum EaseFunction {
     COUNT,
 }
 
-pub struct Tween {
-    pub start: f32,
-    pub end: f32,
+/// T should only be a float or a vec of floats
+pub struct Tween<T> {
+    pub start: T,
+    pub end: T,
     pub duration: Duration,
     pub ease_func: EaseFunction,
     /// 0 to 1
@@ -75,7 +71,9 @@ pub fn tween_mix_v4(v1: v4, v2: v4, t: f32) -> v4 {
     )
 }
 
-pub fn tween_get_value(tween: &Tween) -> f32 {
+pub fn tween_get_value<T>(tween: &Tween<T>) -> T
+    where T: Mul<f32, Output = T> + Add<T, Output = T> + Copy + Clone
+{
     let t = match tween.ease_func {
         EaseFunction::Linear => tween.t,
         EaseFunction::CircOut => f32::sqrt(1.0 - f32::powf(tween.t - 1.0, 2.0)),
@@ -128,7 +126,7 @@ pub struct Game {
     pub gui: Gui,
     magic_number: u32,
 
-    tween_test: Tween,
+    tween_test: Tween<f32>,
 }
 
 struct StaticBlockSet {
@@ -136,21 +134,20 @@ struct StaticBlockSet {
     set_type: BlockSetType,
     blocks: Vec<Index>,
     pos_w: usize,
-    pos: Vec2,
+    pos: v2,
 }
 
 struct BlockSet {
     static_block_set: StaticBlockSet,
-    grid_pos: Pos,
+    grid_pos: v2i,
     blocks_ghost: Vec<Index>,
     ghost_offset: i32, //y offset from grid origin
 }
 
 pub struct Block {
-    pub pos: Vec2,
-    pub color: Vec4,
-    pub tweener_x: MyTween,
-    pub tweener_y: MyTween,
+    pub pos: v2,
+    pub color: v4,
+    pub tween: Tween<v2>,
 }
 
 pub struct Camera {
@@ -160,8 +157,8 @@ pub struct Camera {
 }
 
 pub struct Grid {
-    pub block_positions: HashMap<Pos, Index>,
-    pub pos: Vec2,
+    pub block_positions: HashMap<v2i, Index>,
+    pub pos: v2,
     // the bottom left position of the grid.
     pub width: usize,
     pub height: usize,
@@ -169,23 +166,23 @@ pub struct Grid {
 
 // cute block colors
 pub mod color {
-    use crate::game::{v4, Vec4};
+    use crate::game::v4;
 
-    pub const RED: Vec4 = Vec4::new(1.0, 0.0, 0.0, 1.0);
-    pub const GREEN: Vec4 = Vec4::new(0.0, 1.0, 0.0, 1.0);
-    pub const PINK: Vec4 = Vec4::new(1., 0.541, 0.909, 1.0);
-    pub const YELLOW: Vec4 = Vec4::new(1., 0.968, 0.541, 1.0);
-    pub const COLOR_1: Vec4 = Vec4::new(0.466, 0.882, 0.996, 1.0);
-    pub const COLOR_2: Vec4 = Vec4::new(0.815, 0.121, 1., 1.0);
-    pub const COLOR_3: Vec4 = Vec4::new(0.039, 1., 0.647, 1.0);
-    pub const COLORS: [Vec4; 7] = [RED, GREEN, PINK, YELLOW, COLOR_1, COLOR_2, COLOR_3];
+    pub const RED: v4 = v4::new(1.0, 0.0, 0.0, 1.0);
+    pub const GREEN: v4 = v4::new(0.0, 1.0, 0.0, 1.0);
+    pub const PINK: v4 = v4::new(1., 0.541, 0.909, 1.0);
+    pub const YELLOW: v4 = v4::new(1., 0.968, 0.541, 1.0);
+    pub const COLOR_1: v4 = v4::new(0.466, 0.882, 0.996, 1.0);
+    pub const COLOR_2: v4 = v4::new(0.815, 0.121, 1., 1.0);
+    pub const COLOR_3: v4 = v4::new(0.039, 1., 0.647, 1.0);
+    pub const COLORS: [v4; 7] = [RED, GREEN, PINK, YELLOW, COLOR_1, COLOR_2, COLOR_3];
 
-    pub const NORMAL_MENU_BORDER_COLOR: Vec4 = PINK;
-    pub const HOT_MENU_BORDER_COLOR: Vec4 = RED;
+    pub const NORMAL_MENU_BORDER_COLOR: v4 = PINK;
+    pub const HOT_MENU_BORDER_COLOR: v4 = RED;
 
-    pub const GHOST: Vec4 = Vec4::new(1., 1., 1., 0.3);
-    pub const GRID_BG: Vec4 = Vec4::new(1., 1., 1., 0.1);
-    pub const HUD_BG: Vec4 = Vec4::new(0., 0., 0., 1.);
+    pub const GHOST: v4 = v4::new(1., 1., 1., 0.3);
+    pub const GRID_BG: v4 = v4::new(1., 1., 1., 0.1);
+    pub const HUD_BG: v4 = v4::new(0., 0., 0., 1.);
 }
 
 impl Camera {
@@ -266,7 +263,7 @@ impl BlockSet {
 
         for iter_number in 1..=MAX_ITERATIONS {
             for y_2 in 0..iter_number {
-                new_testing_pos = Pos::new(self.grid_pos.x + iter_number, self.grid_pos.y + y_2);
+                new_testing_pos = v2i::new(self.grid_pos.x + iter_number, self.grid_pos.y + y_2);
                 if self.does_fit(new_testing_pos, &new_positions, grid) {
                     self.grid_pos = new_testing_pos;
                     self.static_block_set.positions = new_positions;
@@ -274,7 +271,7 @@ impl BlockSet {
                 }
             }
             for x_2 in (-iter_number + 1..=iter_number).rev() {
-                new_testing_pos = Pos::new(self.grid_pos.x + x_2, self.grid_pos.y + iter_number);
+                new_testing_pos = v2i::new(self.grid_pos.x + x_2, self.grid_pos.y + iter_number);
                 if self.does_fit(new_testing_pos, &new_positions, grid) {
                     self.grid_pos = new_testing_pos;
                     self.static_block_set.positions = new_positions;
@@ -282,7 +279,7 @@ impl BlockSet {
                 }
             }
             for y_2 in (-iter_number + 1..=iter_number).rev() {
-                new_testing_pos = Pos::new(self.grid_pos.x - iter_number, self.grid_pos.y + y_2);
+                new_testing_pos = v2i::new(self.grid_pos.x - iter_number, self.grid_pos.y + y_2);
                 if self.does_fit(new_testing_pos, &new_positions, grid) {
                     self.grid_pos = new_testing_pos;
                     self.static_block_set.positions = new_positions;
@@ -290,7 +287,7 @@ impl BlockSet {
                 }
             }
             for x_2 in -iter_number..iter_number {
-                new_testing_pos = Pos::new(self.grid_pos.x + x_2, self.grid_pos.y - iter_number);
+                new_testing_pos = v2i::new(self.grid_pos.x + x_2, self.grid_pos.y - iter_number);
                 if self.does_fit(new_testing_pos, &new_positions, grid) {
                     self.grid_pos = new_testing_pos;
                     self.static_block_set.positions = new_positions;
@@ -298,7 +295,7 @@ impl BlockSet {
                 }
             }
             for y_2 in (-1..=iter_number).rev() {
-                new_testing_pos = Pos::new(self.grid_pos.x + iter_number, self.grid_pos.y + y_2);
+                new_testing_pos = v2i::new(self.grid_pos.x + iter_number, self.grid_pos.y + y_2);
                 if self.does_fit(new_testing_pos, &new_positions, grid) {
                     self.grid_pos = new_testing_pos;
                     self.static_block_set.positions = new_positions;
@@ -336,7 +333,7 @@ impl BlockSet {
     }
 
     // does it fit in an alternate global position or alternate position values?
-    fn does_fit(&self, new_pos: Pos, new_positions: &Vec<bool>, grid: &Grid) -> bool {
+    fn does_fit(&self, new_pos: v2i, new_positions: &Vec<bool>, grid: &Grid) -> bool {
         for (index, is_occupied) in new_positions.iter().enumerate() {
             if !is_occupied {
                 continue;
@@ -344,7 +341,7 @@ impl BlockSet {
 
             let x = index % self.static_block_set.pos_w;
             let y = index / self.static_block_set.pos_w;
-            let pos_to_test = Pos::new(new_pos.x + x as i32, new_pos.y + y as i32);
+            let pos_to_test = v2i::new(new_pos.x + x as i32, new_pos.y + y as i32);
 
             if grid.block_positions.contains_key(&pos_to_test) || !grid.is_inside(pos_to_test) {
                 return false;
@@ -355,12 +352,12 @@ impl BlockSet {
 
     fn from_pos(
         grid: &Grid,
-        pos: Pos,
+        pos: v2i,
         pos_w: usize,
         positions: Vec<bool>,
         arena: &mut Arena<Block>,
         set_type: BlockSetType,
-        color: Vec4,
+        color: v4,
     ) -> Self {
         let mut blocks = Vec::new();
         let mut blocks_ghost = Vec::new();
@@ -371,8 +368,8 @@ impl BlockSet {
                 continue;
             }
 
-            blocks.push(arena.insert(Block::new(Vec2::new(0.0, 0.0), color)));
-            blocks_ghost.push(arena.insert(Block::new(Vec2::new(0.0, 0.0), color::GHOST)));
+            blocks.push(arena.insert(Block::new(v2::new(0.0, 0.0), color)));
+            blocks_ghost.push(arena.insert(Block::new(v2::new(0.0, 0.0), color::GHOST)));
         }
 
         let static_block_set = StaticBlockSet {
@@ -562,23 +559,23 @@ impl BlockSet {
     fn update_pos<const INTERPOLATE: bool>(
         &mut self,
         grid: &Grid,
-        new_pos: Pos,
+        new_pos: v2i,
         blocks: &mut Arena<Block>,
     ) {
-        let pos: Vec2 = grid.get_real_position(new_pos);
+        let pos: v2 = grid.get_real_position(new_pos);
         self.grid_pos = new_pos;
 
         let mut block_index = 0;
 
         // getting ghost block position
-        let mut ghost_pos = Pos::new(new_pos.x, new_pos.y);
+        let mut ghost_pos = v2i::new(new_pos.x, new_pos.y);
 
         while self.does_fit(ghost_pos, &self.static_block_set.positions, grid) {
             ghost_pos.y -= 1;
         }
 
         ghost_pos.y += 1;
-        let ghost_pos: Vec2 = grid.get_real_position(ghost_pos);
+        let ghost_pos: v2 = grid.get_real_position(ghost_pos);
 
         for (index, a) in self.static_block_set.positions.iter().enumerate() {
             if !a {
@@ -589,12 +586,12 @@ impl BlockSet {
             let pos_x = index % self.static_block_set.pos_w;
             let pos_y = index / self.static_block_set.pos_w;
 
-            let pos_f32 = Vec2::new(
+            let pos_f32 = v2::new(
                 pos.x + BLOCK_SIZE * pos_x as f32,
                 pos.y - BLOCK_SIZE * pos_y as f32,
             );
 
-            let ghost_pos_f32 = Vec2::new(
+            let ghost_pos_f32 = v2::new(
                 pos.x + BLOCK_SIZE * pos_x as f32,
                 ghost_pos.y - BLOCK_SIZE * pos_y as f32,
             );
@@ -613,7 +610,7 @@ impl StaticBlockSet {
         pos_w: usize,
         arena: &mut Arena<Block>,
         set_type: BlockSetType,
-        color: Vec4,
+        color: v4,
     ) -> Self {
         let mut blocks = Vec::new();
 
@@ -623,7 +620,7 @@ impl StaticBlockSet {
                 continue;
             }
 
-            blocks.push(arena.insert(Block::new(Vec2::new(0.0, 0.0), color)));
+            blocks.push(arena.insert(Block::new(v2::new(0.0, 0.0), color)));
         }
 
         Self {
@@ -631,7 +628,7 @@ impl StaticBlockSet {
             set_type,
             blocks,
             pos_w,
-            pos: Vec2::new(0.0, 0.0),
+            pos: v2::new(0.0, 0.0),
         }
     }
 
@@ -674,7 +671,7 @@ impl StaticBlockSet {
     }
 
     // given a new pos, it sets the new pos then moves all the owned blocks
-    fn update_pos<const INTERPOLATE: bool>(&mut self, new_pos: Vec2, blocks: &mut Arena<Block>) {
+    fn update_pos<const INTERPOLATE: bool>(&mut self, new_pos: v2, blocks: &mut Arena<Block>) {
         self.pos = new_pos;
 
         let mut block_index = 0;
@@ -688,7 +685,7 @@ impl StaticBlockSet {
             let pos_x = index % self.pos_w;
             let pos_y = index / self.pos_w;
 
-            let pos_f32 = Vec2::new(
+            let pos_f32 = v2::new(
                 self.pos.x + BLOCK_SIZE * pos_x as f32,
                 self.pos.y - BLOCK_SIZE * pos_y as f32,
             );
@@ -701,12 +698,12 @@ impl StaticBlockSet {
 
 impl Grid {
     // we do not check if above
-    fn is_inside(&self, pos: Pos) -> bool {
+    fn is_inside(&self, pos: v2i) -> bool {
         pos.x < self.width as i32 && pos.x >= 0 && pos.y >= 0
     }
 
-    fn get_real_position(&self, pos: Pos) -> Vec2 {
-        Vec2::new(
+    fn get_real_position(&self, pos: v2i) -> v2 {
+        v2::new(
             self.pos.x + pos.x as f32 * BLOCK_SIZE,
             self.pos.y - pos.y as f32 * BLOCK_SIZE,
         )
@@ -723,7 +720,7 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet, blocks: &mut Arena<
 
             let x = index % act_block.static_block_set.pos_w;
             let y = index / act_block.static_block_set.pos_w;
-            let the_pos = Pos::new(
+            let the_pos = v2i::new(
                 act_block.grid_pos.x + x as i32,
                 act_block.grid_pos.y + y as i32,
             );
@@ -747,7 +744,7 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet, blocks: &mut Arena<
         let mut line_cleared = true;
 
         'inner: for x in 0..grid.width {
-            let pos_to_check = Pos::new(x as i32, y);
+            let pos_to_check = v2i::new(x as i32, y);
             if !grid.block_positions.contains_key(&pos_to_check) {
                 line_cleared = false;
                 break 'inner;
@@ -765,7 +762,7 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet, blocks: &mut Arena<
         let cleared_row = cleared_row - index as i32;
 
         for x in 0..grid.width {
-            let pos_to_remove = Pos::new(x as i32, cleared_row);
+            let pos_to_remove = v2i::new(x as i32, cleared_row);
             let b_index = grid.block_positions.remove(&pos_to_remove);
             if let Some(b_index) = b_index {
                 // removing the actual block
@@ -779,7 +776,7 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet, blocks: &mut Arena<
         // shifting all the blocks above 1 less
         for y_2 in cleared_row + 1..grid.height as i32 {
             for x in 0..grid.width {
-                let mut pos_to_shift = Pos::new(x as i32, y_2);
+                let mut pos_to_shift = v2i::new(x as i32, y_2);
                 if let Some(block_index) = grid.block_positions.remove(&pos_to_shift) {
                     pos_to_shift.y -= 1;
                     grid.block_positions.insert(pos_to_shift, block_index);
@@ -793,46 +790,41 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet, blocks: &mut Arena<
 }
 
 impl Block {
-    fn new(pos: Vec2, color: Vec4) -> Self {
-        let range = pos.x..=pos.x;
-        let duration = 1000;
-
-        let tween = TweenUsed::new(range, duration);
-        let tweener_x = Tweener::new(tween);
-
-        let range = pos.y..=pos.y;
-        let duration = 1000;
-
-        let tween = TweenUsed::new(range, duration);
-        let tweener_y = Tweener::new(tween);
+    fn new(pos: v2, color: v4) -> Self {
+        let tween = Tween {
+            start: pos,
+            end: pos,
+            duration: Duration::from_millis(1000),
+            ease_func: EaseFunction::CircOut,
+            t: 0.
+        };
 
         Self {
             pos,
             color,
-            tweener_x,
-            tweener_y,
+            tween
         }
     }
 
-    fn update_target_pos<const INTERPOLATE: bool>(&mut self, new_pos: Vec2) {
+    fn update_target_pos<const INTERPOLATE: bool>(&mut self, new_pos: v2) {
 
-        let duration = 300;
-
-        let range = if INTERPOLATE {
-            self.pos.x..=new_pos.x
+        let (start, end) = if INTERPOLATE {
+            (self.pos, new_pos)
         } else {
-            new_pos.x..=new_pos.x
+            (new_pos, new_pos)
         };
-        let tween = TweenUsed::new(range, duration);
-        self.tweener_x = Tweener::new(tween);
 
-        let range = if INTERPOLATE {
-            self.pos.y..=new_pos.y
-        } else {
-            new_pos.y..=new_pos.y
+        if !INTERPOLATE {
+            self.pos = new_pos;
+        }
+
+        self.tween = Tween {
+            start,
+            end,
+            duration: Duration::from_millis(300),
+            ease_func: self.tween.ease_func,
+            t: 0.0
         };
-        let tween = TweenUsed::new(range, duration);
-        self.tweener_y = Tweener::new(tween);
     }
 }
 
@@ -857,7 +849,7 @@ impl Game {
         //making background
         for x in -1i32..=grid.width as i32 {
             for y in -1i32..grid.height as i32 {
-                let pos = Pos::new(x, y);
+                let pos = v2i::new(x, y);
                 let real_pos = grid.get_real_position(pos);
 
                 let color = if x >= 0 && x < grid.width as i32 && y >= 0 && y < grid.height as i32 {
@@ -908,7 +900,7 @@ impl Game {
         // positioning the next blocks
 
         for (i, block_set) in next_blocks.iter_mut().enumerate() {
-            let mut block_pos = Vec2::new(
+            let mut block_pos = v2::new(
                 grid.pos.x + (GRID_WIDTH + 2) as f32 * BLOCK_SIZE + 20.0,
                 FIRST_BLOCK_POS_Y,
             );
@@ -964,13 +956,13 @@ impl Game {
 
         if let Some(ref mut act_block) = self.active_block_set {
             if input.get_key_down(Keys::A) {
-                let new_pos = Pos::new(act_block.grid_pos.x - 1, act_block.grid_pos.y);
+                let new_pos = v2i::new(act_block.grid_pos.x - 1, act_block.grid_pos.y);
 
                 if act_block.does_fit(new_pos, &act_block.static_block_set.positions, &self.grid) {
                     act_block.update_pos::<true>(&self.grid, new_pos, &mut self.blocks);
                 }
             } else if input.get_key_down(Keys::D) {
-                let new_pos = Pos::new(act_block.grid_pos.x + 1, act_block.grid_pos.y);
+                let new_pos = v2i::new(act_block.grid_pos.x + 1, act_block.grid_pos.y);
 
                 if act_block.does_fit(new_pos, &act_block.static_block_set.positions, &self.grid) {
                     act_block.update_pos::<true>(&self.grid, new_pos, &mut self.blocks);
@@ -979,7 +971,7 @@ impl Game {
 
             //hard drop
             if input.get_key_down(Keys::Space) {
-                let mut new_pos = Pos::new(act_block.grid_pos.x, act_block.grid_pos.y);
+                let mut new_pos = v2i::new(act_block.grid_pos.x, act_block.grid_pos.y);
 
                 while act_block.does_fit(new_pos, &act_block.static_block_set.positions, &self.grid)
                 {
@@ -1135,7 +1127,7 @@ impl Game {
 
         // Updating position of the queue blocks
         for (i, block_set) in self.next_blocks.iter_mut().enumerate() {
-            let mut block_pos = Vec2::new(
+            let mut block_pos = v2::new(
                 self.grid.pos.x + (GRID_WIDTH + 2) as f32 * BLOCK_SIZE + 20.0,
                 FIRST_BLOCK_POS_Y,
             );
@@ -1155,7 +1147,7 @@ impl Game {
         let mut spawn_new_block_set = false;
 
         if let Some(ref mut act_block) = self.active_block_set {
-            let new_pos = Pos::new(act_block.grid_pos.x, act_block.grid_pos.y - 1);
+            let new_pos = v2i::new(act_block.grid_pos.x, act_block.grid_pos.y - 1);
 
             if act_block.does_fit(new_pos, &act_block.static_block_set.positions, &self.grid) {
                 //updating block positions too
@@ -1235,14 +1227,14 @@ pub fn game_update(game: &mut Game, input: &Input, dt: Duration) {
     }
 
     // updating all block positions
-    // TODO: do a lerp here
     for (_, b) in game.blocks.iter_mut() {
-        if let Some(val) = b.tweener_x.update(dt.as_millis() as i64) {
-            b.pos.x = val;
+        b.tween.t += dt.as_micros() as f32 / b.tween.duration.as_micros() as f32;
+
+        if b.tween.t > 1.0 {
+            b.tween.t = 1.0;
         }
-        if let Some(val) = b.tweener_y.update(dt.as_millis() as i64) {
-            b.pos.y = val;
-        }
+
+        b.pos = tween_get_value(&b.tween);
     }
 
     draw_text_pos(

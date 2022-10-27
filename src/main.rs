@@ -1,6 +1,5 @@
 #![allow(dead_code, non_camel_case_types)]
 
-
 mod game;
 mod gui;
 mod input;

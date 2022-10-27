@@ -30,7 +30,7 @@ pub struct Gui {
 
     was_hot: bool,
 
-    pub hot_tween: Tween
+    pub hot_tween: Tween<f32>
 }
 
 pub enum Layout {
