@@ -6,22 +6,48 @@ use libs::wgpu;
 use libs::wgpu::{util::DeviceExt, BindGroup, Device, Queue, RenderPass, Sampler};
 use std::collections::HashMap;
 
+pub const SPACE_WIDTH: f32 = 5.0;
+
 pub struct TextRenderer {
-    pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
-    sampler: wgpu::Sampler,
+    pub pipeline: wgpu::RenderPipeline,
+    pub vertex_buffer: wgpu::Buffer,
+    pub sampler: wgpu::Sampler,
     // @TODO(lucypero): do index buffer for text vertices later
-    char_map: HashMap<char, Character>,
-    strings_to_render: Vec<StringOnScreen>,
+    pub char_map: HashMap<char, Character>,
 }
 
-struct StringOnScreen {
-    text: String,
-    pos: Vector2<f32>,
+impl TextRenderer {
+    pub fn get_string_extents(&self, the_str: &str) -> Vector2<f32> {
+        //loop over the character and add up the pixel advance
+
+        let mut extent_x:f32 = 0.0;
+        let mut extent_y:f32 = 0.0;
+
+        for c in the_str.chars() {
+            if c == ' ' {
+                extent_x += SPACE_WIDTH;
+                continue;
+            }
+
+            let char_info = self.char_map.get(&c).unwrap();
+            extent_x += (char_info.advance >> 6) as f32;
+
+            if extent_y < char_info.size.y as f32 {
+                extent_y = char_info.size.y as f32;
+            }
+        }
+
+        Vector2::new(extent_x, extent_y)
+    }
+}
+
+pub struct StringOnScreen {
+    pub text: String,
+    pub pos: Vector2<f32>,
 }
 
 #[derive(Debug)]
-struct Character {
+pub struct Character {
     bind_group: BindGroup,
     size: Vector2<u32>,
     bearing: Vector2<i32>,
@@ -76,54 +102,23 @@ pub fn init_text_renderer(
         "text pipeline",
     );
 
-    // placing 20 strings randomly (test)
-
-    /*
-
-    let mut strings_test = Vec::with_capacity(200);
-    {
-        use libs::rand::Rng;
-        use libs::rand;
-        let mut rng = rand::thread_rng();
-
-        let strings_to_render = 200;
-        let string_test: &str = "i love you babi <3";
-
-        let char_total = string_test.chars().filter(|c| *c != ' ').count() * strings_to_render;
-
-        println!("rendering a total of {char_total} characters");
-
-        for _ in 0..strings_to_render {
-            let pos = Vector2::new(
-                rng.gen_range(0.0..WINDOW_INNER_WIDTH as f32),
-                rng.gen_range(0.0..WINDOW_INNER_HEIGHT as f32),
-            );
-            strings_test.push(StringOnScreen {
-                text: string_test.into(),
-                pos,
-            });
-        }
-    }
-    */
-
     TextRenderer {
         pipeline,
         vertex_buffer,
         sampler,
         char_map,
-        strings_to_render: Vec::new()
     }
 }
 
 impl TextRenderer {
-    pub fn render<'a>(&'a self, render_pass: &mut RenderPass<'a>, camera_bg: &'a BindGroup) {
+    pub fn render<'a>(&'a self, render_pass: &mut RenderPass<'a>, camera_bg: &'a BindGroup, the_strings: &Vec<StringOnScreen>) {
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, camera_bg, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
 
         let mut i = 0;
 
-        for label in self.strings_to_render.iter() {
+        for label in the_strings.iter() {
             for c in label.text.chars() {
                 if c == ' ' {
                     continue;
@@ -139,13 +134,11 @@ impl TextRenderer {
     }
 
     /// generates all the vertices for all the rendered text and re-writes the vertex buffer
-    pub fn update_vertices(&self, queue: &Queue) {
+    pub fn update_vertices(&self, queue: &Queue, the_strings: &Vec<StringOnScreen>) {
         //updating text vertex buffer
 
         // calculating how many glyphs to draw
-        let characters_to_draw_len = self
-            .strings_to_render
-            .iter()
+        let characters_to_draw_len = the_strings.iter()
             .map(|s| s.text.chars())
             .flatten()
             .filter(|c| *c != ' ')
@@ -153,7 +146,7 @@ impl TextRenderer {
 
         let mut vertices: Vec<Vertex> = Vec::with_capacity(6 * characters_to_draw_len);
 
-        for label in self.strings_to_render.iter() {
+        for label in the_strings.iter() {
             let string_start_x: f32 = label.pos.x;
             let string_start_y: f32 = label.pos.y;
 

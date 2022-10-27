@@ -48,10 +48,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var maxY = 1.0 - (border_width_buf[i] * aspect_ratio_buf[i]);
     var minY = border_width_buf[i] * aspect_ratio_buf[i];
 
+    // let the_alpha = mix(0.0, 1.0, pow(length(vec2(in.tex_coords.x, in.tex_coords.y)), 2.0));
+    let the_alpha_x = mix(1.2, 0.4, pow(in.tex_coords.x, 1.3));
+    let the_alpha_y = mix(1.2, 0.4, pow(in.tex_coords.y, 1.3));
+    let the_total = 2.0;
+
+    let the_alpha = (the_alpha_x + the_alpha_y) / 2.0;
+
     if (in.tex_coords.x < maxX && in.tex_coords.x > minX &&
         in.tex_coords.y < maxY && in.tex_coords.y > minY) {
-        return fill_color_buf[i];
+        return vec4(fill_color_buf[i].xyz * the_alpha, fill_color_buf[i].w);
     } else {
-        return border_color_buf[i];
+        return vec4(border_color_buf[i].xyz * the_alpha, border_color_buf[i].w);
     }
 }

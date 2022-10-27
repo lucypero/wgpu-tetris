@@ -1,12 +1,13 @@
+use crate::gui::*;
 use crate::input::{Input, Keys};
+use libs::cgmath::{Vector2, Vector3, Vector4};
 use libs::rand;
-use libs::cgmath::{Vector2, Vector4};
 use libs::rand::seq::SliceRandom;
-use std::collections::{HashMap, VecDeque};
-use std::time::Duration;
 use libs::thunderdome::{Arena, Index};
 use libs::tween::{CircOut, Tweener};
-
+use std::collections::{HashMap, VecDeque};
+use std::mem::transmute;
+use std::time::Duration;
 
 // (0,0) is bottom left (of grid)
 type Pos = Vector2<i32>;
@@ -24,6 +25,12 @@ const HOLD_BLOCK_POS: Vec2 = Vec2::new(30.0, BLOCK_SIZE * 10.0);
 const NEXT_BLOCKS_COUNT: usize = 5;
 const FIRST_BLOCK_POS_Y: f32 = 250.0;
 
+pub type v2 = Vector2<f32>;
+pub type v4 = Vector4<f32>;
+pub type v2i = Vector2<i32>;
+pub type v3 = Vector3<f32>;
+pub type v3i = Vector3<i32>;
+
 pub fn foo(a: i32, b: i32) -> i32 {
     a + b
 }
@@ -40,6 +47,72 @@ enum BlockSetType {
 }
 const BLOCK_COUNT: usize = 8;
 
+#[repr(u32)]
+pub enum EaseFunction {
+    Linear,
+    CircOut,
+    EaseOutBounce,
+    EaseOutElastic,
+    COUNT,
+}
+
+pub struct Tween {
+    pub start: f32,
+    pub end: f32,
+    pub duration: Duration,
+    pub ease_func: EaseFunction,
+    /// 0 to 1
+    pub t: f32,
+}
+
+// mixing functions
+pub fn tween_mix_v4(v1: v4, v2: v4, t: f32) -> v4 {
+    v4::new(
+        v1.x * (1.0 - t) + v2.x * t,
+        v1.y * (1.0 - t) + v2.y * t,
+        v1.z * (1.0 - t) + v2.z * t,
+        v1.w * (1.0 - t) + v2.w * t,
+    )
+}
+
+pub fn tween_get_value(tween: &Tween) -> f32 {
+    let t = match tween.ease_func {
+        EaseFunction::Linear => tween.t,
+        EaseFunction::CircOut => f32::sqrt(1.0 - f32::powf(tween.t - 1.0, 2.0)),
+        EaseFunction::EaseOutBounce => {
+            const N1: f32 = 7.5625;
+            const D1: f32 = 2.75;
+
+            if tween.t < 1.0 / D1 {
+                N1 * tween.t * tween.t
+            } else if tween.t < 2.0 / D1 {
+                let temp = tween.t - (1.5 / D1);
+                N1 * temp * temp + 0.75
+            } else if tween.t < 2.5 / D1 {
+                let temp = tween.t - (2.25 / D1);
+                N1 * temp * temp + 0.9375
+            } else {
+                let temp = tween.t - (2.625 / D1);
+                N1 * temp * temp + 0.984375
+            }
+        }
+        EaseFunction::EaseOutElastic => {
+            const C4: f32 = (2.0 * std::f32::consts::PI) / 3.0;
+
+            if tween.t == 0.0 {
+                0.0
+            } else if tween.t == 1.0 {
+                1.0
+            } else {
+                f32::powf(2.0, -10.0 * tween.t) * f32::sin((tween.t * 10.0 - 0.75) * C4) + 1.0
+            }
+        }
+        _ => tween.t,
+    };
+
+    tween.start * (1.0 - t) + tween.end * t
+}
+
 pub struct Game {
     pub blocks: Arena<Block>,
     active_block_set: Option<BlockSet>,
@@ -52,6 +125,10 @@ pub struct Game {
     next_block_types: Vec<BlockSetType>,
     next_block_index: usize,
     rng: rand::rngs::ThreadRng,
+    pub gui: Gui,
+    magic_number: u32,
+
+    tween_test: Tween,
 }
 
 struct StaticBlockSet {
@@ -91,8 +168,8 @@ pub struct Grid {
 }
 
 // cute block colors
-mod color {
-    use crate::game::Vec4;
+pub mod color {
+    use crate::game::{v4, Vec4};
 
     pub const RED: Vec4 = Vec4::new(1.0, 0.0, 0.0, 1.0);
     pub const GREEN: Vec4 = Vec4::new(0.0, 1.0, 0.0, 1.0);
@@ -102,6 +179,9 @@ mod color {
     pub const COLOR_2: Vec4 = Vec4::new(0.815, 0.121, 1., 1.0);
     pub const COLOR_3: Vec4 = Vec4::new(0.039, 1., 0.647, 1.0);
     pub const COLORS: [Vec4; 7] = [RED, GREEN, PINK, YELLOW, COLOR_1, COLOR_2, COLOR_3];
+
+    pub const NORMAL_MENU_BORDER_COLOR: Vec4 = PINK;
+    pub const HOT_MENU_BORDER_COLOR: Vec4 = RED;
 
     pub const GHOST: Vec4 = Vec4::new(1., 1., 1., 0.3);
     pub const GRID_BG: Vec4 = Vec4::new(1., 1., 1., 0.1);
@@ -151,7 +231,6 @@ impl BlockSet {
 
         /*
         0
-
         1 0
         1 1
         0 1
@@ -736,14 +815,14 @@ impl Block {
     }
 
     fn update_target_pos<const INTERPOLATE: bool>(&mut self, new_pos: Vec2) {
+
+        let duration = 300;
+
         let range = if INTERPOLATE {
             self.pos.x..=new_pos.x
         } else {
             new_pos.x..=new_pos.x
         };
-
-        let duration = 300;
-
         let tween = TweenUsed::new(range, duration);
         self.tweener_x = Tweener::new(tween);
 
@@ -752,7 +831,6 @@ impl Block {
         } else {
             new_pos.y..=new_pos.y
         };
-
         let tween = TweenUsed::new(range, duration);
         self.tweener_y = Tweener::new(tween);
     }
@@ -845,6 +923,15 @@ impl Game {
             block_set.update_pos::<false>(block_pos, &mut arena);
         }
 
+        //test tween
+        let tween_test = Tween {
+            start: -600.0,
+            end: 0.0,
+            duration: Duration::from_millis(1500),
+            ease_func: EaseFunction::EaseOutBounce,
+            t: 0.0,
+        };
+
         let mut game = Self {
             blocks: arena,
             active_block_set: None,
@@ -861,6 +948,9 @@ impl Game {
             next_block_types,
             next_block_index: 0,
             rng,
+            gui: init_gui(),
+            magic_number: 4,
+            tween_test,
         };
 
         game.swap_active_block_set_from_next_blocks();
@@ -1081,39 +1171,87 @@ impl Game {
             self.swap_active_block_set_from_next_blocks();
         }
     }
+}
 
-    pub fn update(&mut self, input: &Input, dt: Duration) {
-        self.tick_timer += dt;
+fn draw_gui(game: &mut Game, _input: &Input) {
+    let gui = &mut game.gui;
+    let gui_x = tween_get_value(&game.tween_test);
 
-        if self.tick_timer.as_millis() >= 400 {
-            //perform tick
-            self.down_tick();
-            self.tick_timer -= Duration::from_millis(400);
-        }
-
-        static mut CONTROL_CAMERA: bool = false;
-
-        unsafe {
-            if input.get_key_down(Keys::Down) {
-                CONTROL_CAMERA = !CONTROL_CAMERA;
-            }
-
-            if CONTROL_CAMERA {
-                self.camera.do_move_controls(&input);
-            } else {
-                self.do_block_controls(&input);
-            }
-        }
-
-        // updating all block positions
-        // TODO: do a lerp here
-        for (_, b) in self.blocks.iter_mut() {
-            if let Some(val) = b.tweener_x.update(dt.as_millis() as i64) {
-                b.pos.x = val;
-            }
-            if let Some(val) = b.tweener_y.update(dt.as_millis() as i64) {
-                b.pos.y = val;
-            }
+    gui_bind_layout(
+        gui,
+        Layout::VerticalCentered(v2::new(200.0, 80.0), v2::new(gui_x, 0.0)),
+    );
+    for i in 0..game.magic_number {
+        if do_button(gui, format!("Play {}", i).into()) {
+            println!("pressed hello {}", i);
         }
     }
+}
+
+pub fn game_update(game: &mut Game, input: &Input, dt: Duration) {
+    game.tick_timer += dt;
+
+    //updating tweens
+    game.tween_test.t += dt.as_micros() as f32 / game.tween_test.duration.as_micros() as f32;
+    if game.tween_test.t > 1.0 {
+        game.tween_test.t = 1.0;
+    }
+
+    gui_frame_start(
+        &mut game.gui,
+        input.mouse_x,
+        input.mouse_y,
+        input.get_key(Keys::Mouse1),
+        dt,
+    );
+
+    if game.tick_timer.as_millis() >= 400 {
+        //perform tick
+        game.down_tick();
+        game.tick_timer -= Duration::from_millis(400);
+    }
+
+    if input.get_key_down(Keys::NumpadAdd) {
+        let mut next_ease = game.tween_test.ease_func as u32 + 1;
+        if next_ease == EaseFunction::COUNT as u32 {
+            next_ease = 0;
+        }
+        game.tween_test.ease_func = unsafe { transmute(next_ease) };
+        game.tween_test.t = 0.0;
+    }
+
+    static mut CONTROL_CAMERA: bool = false;
+
+    unsafe {
+        if input.get_key_down(Keys::Down) {
+            CONTROL_CAMERA = !CONTROL_CAMERA;
+        }
+
+        if CONTROL_CAMERA {
+            game.camera.do_move_controls(&input);
+        } else {
+            game.do_block_controls(&input);
+        }
+    }
+
+    // updating all block positions
+    // TODO: do a lerp here
+    for (_, b) in game.blocks.iter_mut() {
+        if let Some(val) = b.tweener_x.update(dt.as_millis() as i64) {
+            b.pos.x = val;
+        }
+        if let Some(val) = b.tweener_y.update(dt.as_millis() as i64) {
+            b.pos.y = val;
+        }
+    }
+
+    draw_text_pos(
+        &mut game.gui,
+        format!("ft: {}us", dt.as_micros()).into(),
+        v2::new(2.0, 20.0),
+    );
+
+    draw_gui(game, input);
+
+    gui_frame_end(&mut game.gui);
 }

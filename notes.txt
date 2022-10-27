@@ -1,7 +1,38 @@
-Font rendering todo:
+Todo:
 
-- make an index buffer and render indexed (that makes it go faster i think)
+- make a pipeline for a background for when the GUI is on the screen
+    - a vignette effect could be cool
+    - animate the vignette on transition (have to play with time)
 
+- make the game respect one static aspect ratio regardless of window res
+    - black bars
+
+- figure out post-processing!
+
+-----------------------------------------------------------------
+
+Notes:
+
+Note 1:
+
+pattern for rendering anything in wgpu:
+
+init stage:
+
+- create all the uniform buffers
+- create the vertex buffer
+- store the relevant data that will be used to write to all the buffers
+- create the pipeline
+
+somewhere else, maybe every frame:
+
+- you write to all the uniform and vertex buffers
+
+then every frame
+
+- you render
+
+Note 2:
 
 GUI calling api (maybe):
 
@@ -20,52 +51,66 @@ GUI::draw_menu()
   })
   .build()
 
+// simpler (not builder pattern but it's the same thing but simpler)
 
-------- this below is old ------------
-
-
-First goal:
-
-- Shader needs to have:
-
-Todo:
-
-- do a bindgroupthing::new
-- try to generlize the texture and camera creation too
-
-- make the game respect one static aspect ratio regardless of window res
-
-Ralith:
-
-it doesn't have to be complicated or abstract, your renderer can deeply
-encode knowledge of the structure of your game
-the point is that the game doesn't encode knowledge of the renderer
-
------- how to make the next block randomness ----
-
-just keep a list of piece types [L, J, S, Z, T, O, I] and an index = 0,
-shuffle the list when index == 0 and index = (index + 1) % piece_types.length each time
-
-every next piece you generate will just be the next in the list
-and each time you reach the end of the list, you reset the index to 0 and re-shuffle
-so that next time you iterate over the list it will be random again
+draw_menu(MenuDescriptor {
+    centered: true,
+    pos: v2::new(20.0,20.0),
+    // [...]
+    ..Default::default()
+});
 
 
-rectangles with border - shader:
 
-frag shader:
+Note 3:
 
-    var border_width = 0.1; // this is a uniform
-    var aspect = 1.0; // this is a uniform
+generalize pipeline creation:
 
-    var maxX = 1.0 - border_width;
-    var minX = border_width;
-    var maxY = maxX / aspect;
-    var minY = minX / aspect;
+create_rendererer(RendererDescriptor{
+    buffers:
+    shader: "shaders/blabla.wgsl",
 
-    if (in.tex_coords.x < maxX && in.tex_coords.x > minX &&
-        in.tex_coords.y < maxY && in.tex_coords.y > minY) {
-        return vec4(0.0, 0.0, 0.0, 0.0);
-    } else {
-        return vec4(1.0, 0.0, 0.0, 1.0);
+    
+    ..Default::default()
+})
+
+Note 4: 
+
+tween system
+
+fn tween_update(t, dt) {
+    t.t += duration / dt;
+}
+
+fn tween_get_value(t) {
+    //linear function
+
+    let t = match t.ease_func {
+        Linear => {
+            t
+        }
+        CircOut => {
+            sqrt(1 - pow(t - 1, 2));
+        }
     }
+
+    t.start * (1 - t.t) + t.end * t.t
+}
+
+
+//in your game update loop
+fn game_update() {
+    for t in tweens {
+        t.update(dt)
+    }
+}
+
+struct tween{
+    initial_value,
+    end_value
+    current_value,
+}
+
+then you pass the magic number each frame to the gui
+
+gui_bind_layout(gui, Layout::VerticalCentered(v2::new(200.0, 80.0), anim_vec)); (anim vec would be to offset the position for the anim)

@@ -3,6 +3,7 @@ extern crate core;
 mod font_renderer;
 
 use crate::{game, Game};
+use game::*;
 use libs::bytemuck;
 use libs::cgmath;
 use libs::cgmath::{Matrix4, Vector2, Vector3, Vector4};
@@ -17,8 +18,8 @@ use libs::wgpu::{
 use libs::winit;
 use std::mem;
 
-pub const WINDOW_INNER_WIDTH: u32 = 1000;
-pub const WINDOW_INNER_HEIGHT: u32 = 900;
+use self::font_renderer::StringOnScreen;
+
 const MAX_CHARACTERS_ON_SCREEN: usize = 50000;
 // Fixed number of block instances in the instance renderer
 //  In the game, there will always be less than this.
@@ -314,11 +315,109 @@ struct BorderedRect {
 struct BorderedRectsRenderer {
     pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
-    rects: Vec<BorderedRect>,
     border_color_buffer: BindGroupSetThing<Vec<Vec4>>,
     fill_color_buffer: BindGroupSetThing<Vec<Vec4>>,
     aspect_ratio_buffer: BindGroupSetThing<Vec<f32>>,
     border_width_buffer: BindGroupSetThing<Vec<f32>>,
+}
+
+impl BorderedRectsRenderer {
+    fn update_buffers(&mut self, queue: &Queue, bordered_rects: &Vec<BorderedRect>) {
+        // writing bordered rect vertex buffer
+        let mut vertices: Vec<Vertex> = Vec::with_capacity(6 * bordered_rects.len());
+
+        for block in bordered_rects.iter() {
+            let xpos = block.pos.x;
+            let ypos = block.pos.y;
+            let w = block.extents.x;
+            let h = block.extents.y;
+
+            // origin is top left
+
+            /*
+            (0)     (2, 4)
+            |-------|
+            |       |
+            |       |
+            |-------|
+            (1, 3)  (3, 5)
+            */
+
+            // first triangle
+            vertices.push(Vertex {
+                position: [xpos, ypos, 0.0],
+                tex_coords: [0.0, 1.0],
+            });
+            vertices.push(Vertex {
+                position: [xpos, ypos + h, 0.0],
+                tex_coords: [0.0, 0.0],
+            });
+            vertices.push(Vertex {
+                position: [xpos + w, ypos, 0.0],
+                tex_coords: [1.0, 1.0],
+            });
+
+            // second triangle
+            vertices.push(Vertex {
+                position: [xpos, ypos + h, 0.0],
+                tex_coords: [0.0, 0.0],
+            });
+            vertices.push(Vertex {
+                position: [xpos + w, ypos, 0.0],
+                tex_coords: [1.0, 1.0],
+            });
+            vertices.push(Vertex {
+                position: [xpos + w, ypos + h, 0.0],
+                tex_coords: [1.0, 0.0],
+            });
+        }
+
+        queue.write_buffer(
+            &self.vertex_buffer,
+            0,
+            bytemuck::cast_slice(vertices.as_slice()),
+        );
+
+        // writing to all bordered rect buffers
+        self.border_color_buffer.the_data.clear();
+        self.fill_color_buffer.the_data.clear();
+        self.aspect_ratio_buffer.the_data.clear();
+        self.border_width_buffer.the_data.clear();
+
+        for rect in bordered_rects.iter() {
+            self.border_color_buffer
+                .the_data
+                .push(rect.border_color.into());
+            self.fill_color_buffer.the_data.push(rect.fill_color.into());
+            self.border_width_buffer
+                .the_data
+                .push(rect.border_width / rect.extents.x);
+            self.aspect_ratio_buffer
+                .the_data
+                .push(rect.extents.x / rect.extents.y);
+        }
+
+        queue.write_buffer(
+            &self.border_color_buffer.buffer,
+            0,
+            bytemuck::cast_slice(self.border_color_buffer.the_data.as_slice()),
+        );
+        queue.write_buffer(
+            &self.fill_color_buffer.buffer,
+            0,
+            bytemuck::cast_slice(self.fill_color_buffer.the_data.as_slice()),
+        );
+        queue.write_buffer(
+            &self.aspect_ratio_buffer.buffer,
+            0,
+            bytemuck::cast_slice(self.aspect_ratio_buffer.the_data.as_slice()),
+        );
+        queue.write_buffer(
+            &self.border_width_buffer.buffer,
+            0,
+            bytemuck::cast_slice(self.border_width_buffer.the_data.as_slice()),
+        );
+    }
 }
 
 pub struct WgpuContext {
@@ -527,14 +626,26 @@ fn init_wgpu_context(window: &libs::winit::window::Window) -> WgpuContext {
     }
 }
 
+fn new_bordered_rect_b_color(pos: Vector2<f32>, extents: Vector2<f32>, b_c: v4) -> BorderedRect {
+    BorderedRect {
+        pos,
+        extents,
+        border_width: 6.0,
+        border_color: b_c, //pink
+        // border_color: Vector4::new(0.15, 0.7, 0.7, 1.0), //teal
+        fill_color: Vector4::new(1.0, 1.0, 1.0, 0.3),
+    }
+}
+
 /// draws semi transparent rect with cute pinki border
 fn new_bordered_rect(pos: Vector2<f32>, extents: Vector2<f32>) -> BorderedRect {
     BorderedRect {
         pos,
         extents,
-        border_width: 5.0,
-        border_color: Vector4::new(1.0, 0.459, 0.918, 1.0),
-        fill_color: Vector4::new(1.0, 1.0, 1.0, 0.2),
+        border_width: 6.0,
+        border_color: Vector4::new(1.0, 0.459, 0.918, 1.0), //pink
+        // border_color: Vector4::new(0.15, 0.7, 0.7, 1.0), //teal
+        fill_color: Vector4::new(1.0, 1.0, 1.0, 0.3),
     }
 }
 
@@ -569,7 +680,6 @@ fn new_storage_buffer<T>(
 
 fn init_bordered_rect_renderer(
     device: &Device,
-    queue: &Queue,
     camera_layout: &BindGroupLayout,
     surface_config: &SurfaceConfiguration,
 ) -> BorderedRectsRenderer {
@@ -592,8 +702,6 @@ fn init_bordered_rect_renderer(
         contents: &zeroed_verts,
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
     });
-
-    // @TODO(lucypero): do some test bordered rects and write the vertices
 
     // making pipeline
     let pipeline = {
@@ -624,28 +732,31 @@ fn init_bordered_rect_renderer(
         )
     };
 
-    let mut rects: Vec<BorderedRect> = Vec::with_capacity(20);
-    rects.push(new_bordered_rect(
-        Vector2::new(20.0, 200.0),
-        Vector2::new(50.0, 100.0),
-    ));
-    rects.push(new_bordered_rect(
-        Vector2::new(200.0, 200.0),
-        Vector2::new(50.0, 150.0),
-    ));
-    rects.push(new_bordered_rect(
-        Vector2::new(20.0, 600.0),
-        Vector2::new(150.0, 50.0),
-    ));
-    rects.push(new_bordered_rect(
-        Vector2::new(600.0, 600.0),
-        Vector2::new(200.0, 100.0),
-    ));
+    //let rects: Vec<BorderedRect> = Vec::with_capacity(20);
+    // rects.push(new_bordered_rect(
+    //     Vector2::new(20.0, 200.0),
+    //     Vector2::new(50.0, 100.0),
+    // ));
+    // rects.push(new_bordered_rect(
+    //     Vector2::new(200.0, 200.0),
+    //     Vector2::new(50.0, 150.0),
+    // ));
+    // rects.push(new_bordered_rect(
+    //     Vector2::new(20.0, 600.0),
+    //     Vector2::new(150.0, 50.0),
+    // ));
+    // rects.push(new_bordered_rect(
+    //     Vector2::new(600.0, 600.0),
+    //     Vector2::new(200.0, 100.0),
+    // ));
+    // rects.push(new_bordered_rect(
+    //     Vector2::new(500.0, 200.0),
+    //     Vector2::new(100.0, 100.0),
+    // ));
 
     BorderedRectsRenderer {
         pipeline,
         vertex_buffer,
-        rects,
         border_color_buffer,
         fill_color_buffer,
         aspect_ratio_buffer,
@@ -689,12 +800,9 @@ pub fn init_renderer(window: &libs::winit::window::Window, game: &Game) -> Rende
     };
 
     let block_renderer = init_block_renderer(device, queue, &camera.layout, &ctx.surface_config);
-
     let text_renderer = font_renderer::init_text_renderer(device, queue, &ctx.surface_config);
-    text_renderer.update_vertices(queue);
-
     let bordered_rects_renderer =
-        init_bordered_rect_renderer(device, queue, &camera.layout, &ctx.surface_config);
+        init_bordered_rect_renderer(device, &camera.layout, &ctx.surface_config);
 
     Renderer {
         ctx,
@@ -786,98 +894,66 @@ pub fn render(renderer: &mut Renderer, game: &Game) -> Result<(), wgpu::SurfaceE
         ),
     );
 
-    let border_renderer = &mut renderer.bordered_rects_renderer;
+    // GUI Rendering...
 
-    // writing bordered rect vertex buffer
-    {
-        let mut vertices: Vec<Vertex> = Vec::with_capacity(6 * border_renderer.rects.len());
+    /*
+        - create a stringonscreen vec to render all text
+        - create a borderedrect vec to render al bordered rects
 
+        - then populate those again properly, according to gui state
+    */
 
-        for block in border_renderer.rects.iter() {
+    let mut strings_to_render: Vec<StringOnScreen> = Vec::with_capacity(40);
+    let mut bordered_rects: Vec<BorderedRect> = Vec::with_capacity(50);
 
-            let xpos = block.pos.x;
-            let ypos = block.pos.y;
-            let w = block.extents.x;
-            let h = block.extents.y;
+    // reading gui state . . .
+    let widgets = &game.gui.widgets;
 
-            vertices.push(Vertex {
-                position: [xpos, ypos - h, 0.0],
-                tex_coords: [0.0, 0.0],
-            });
-            vertices.push(Vertex {
-                position: [xpos, ypos, 0.0],
-                tex_coords: [0.0, 1.0],
-            });
-            vertices.push(Vertex {
-                position: [xpos + w, ypos, 0.0],
-                tex_coords: [1.0, 1.0],
-            });
-            vertices.push(Vertex {
-                position: [xpos, ypos - h, 0.0],
-                tex_coords: [0.0, 0.0],
-            });
-            vertices.push(Vertex {
-                position: [xpos + w, ypos, 0.0],
-                tex_coords: [1.0, 1.0],
-            });
-            vertices.push(Vertex {
-                position: [xpos + w, ypos - h, 0.0],
-                tex_coords: [1.0, 0.0],
-            });
+    let hot_tween_v = tween_get_value(&game.gui.hot_tween);
+
+    for widget in widgets.iter() {
+        match widget.widget_type {
+            crate::gui::WidgetType::Button => {
+                let p = widget.computed_position;
+                let s = widget.computed_size;
+
+                let mut border_color = color::NORMAL_MENU_BORDER_COLOR;
+
+                if crate::gui::is_widget_hot(&game.gui, &widget) {
+                    border_color = tween_mix_v4(color::NORMAL_MENU_BORDER_COLOR, color::HOT_MENU_BORDER_COLOR, hot_tween_v);
+                }
+
+                bordered_rects.push(new_bordered_rect_b_color(p, s, border_color));
+
+                // centering text
+                let label_extents = renderer
+                    .text_renderer
+                    .get_string_extents(widget.label.as_str());
+                strings_to_render.push(StringOnScreen {
+                    text: widget.label.clone(),
+                    pos: v2::new(
+                        (p.x + (s.x / 2.0) - (label_extents.x / 2.0)).floor(),
+                        (p.y + (s.y / 2.0) + (label_extents.y / 2.0)).floor(),
+                    ),
+                });
+            }
+            crate::gui::WidgetType::Label => {
+                strings_to_render.push(StringOnScreen {
+                    text: widget.label.clone(),
+                    pos: v2::new(widget.computed_position.x, widget.computed_position.y),
+                });
+            }
         }
-
-        queue.write_buffer(
-            &border_renderer.vertex_buffer,
-            0,
-            bytemuck::cast_slice(vertices.as_slice()),
-        );
     }
 
-    // writing to all bordered rect buffers
-    border_renderer.border_color_buffer.the_data.clear();
-    border_renderer.fill_color_buffer.the_data.clear();
-    border_renderer.aspect_ratio_buffer.the_data.clear();
-    border_renderer.border_width_buffer.the_data.clear();
+    // Updating bordered rect buffers
 
-    for rect in border_renderer.rects.iter() {
-        border_renderer
-            .border_color_buffer
-            .the_data
-            .push(rect.border_color.into());
-        border_renderer
-            .fill_color_buffer
-            .the_data
-            .push(rect.fill_color.into());
-        border_renderer
-            .border_width_buffer
-            .the_data
-            .push(rect.border_width / rect.extents.x);
-        border_renderer
-            .aspect_ratio_buffer
-            .the_data
-            .push(rect.extents.x / rect.extents.y);
-    }
-
-    queue.write_buffer(
-        &border_renderer.border_color_buffer.buffer,
-        0,
-        bytemuck::cast_slice(border_renderer.border_color_buffer.the_data.as_slice()),
-    );
-    queue.write_buffer(
-        &border_renderer.fill_color_buffer.buffer,
-        0,
-        bytemuck::cast_slice(border_renderer.fill_color_buffer.the_data.as_slice()),
-    );
-    queue.write_buffer(
-        &border_renderer.aspect_ratio_buffer.buffer,
-        0,
-        bytemuck::cast_slice(border_renderer.aspect_ratio_buffer.the_data.as_slice()),
-    );
-    queue.write_buffer(
-        &border_renderer.border_width_buffer.buffer,
-        0,
-        bytemuck::cast_slice(border_renderer.border_width_buffer.the_data.as_slice()),
-    );
+    renderer
+        .text_renderer
+        .update_vertices(queue, &strings_to_render);
+    renderer
+        .bordered_rects_renderer
+        .update_buffers(queue, &bordered_rects);
 
     // Render pass
     let output = renderer.ctx.surface.get_current_texture()?;
@@ -943,11 +1019,6 @@ pub fn render(renderer: &mut Renderer, game: &Game) -> Result<(), wgpu::SurfaceE
             );
         }
 
-        // Rendering text
-        renderer
-            .text_renderer
-            .render(&mut render_pass, &renderer.camera.bind_group);
-
         // Rendering bordered rectangles
         let border_renderer = &renderer.bordered_rects_renderer;
         render_pass.set_pipeline(&border_renderer.pipeline);
@@ -958,11 +1029,14 @@ pub fn render(renderer: &mut Renderer, game: &Game) -> Result<(), wgpu::SurfaceE
         render_pass.set_bind_group(4, &border_renderer.border_width_buffer.bind_group, &[]);
         render_pass.set_vertex_buffer(0, border_renderer.vertex_buffer.slice(..));
 
-        // @TODO(lucypero): fuck how do i do this..
-        // so i have all verts in a buffer so should b able to draw all that in 1 draw call i think
-        // but then how do index all the buffers
-        // damn i am not sure
-        render_pass.draw(0..border_renderer.rects.len() as u32 * 6, 0..1);
+        render_pass.draw(0..bordered_rects.len() as u32 * 6, 0..1);
+
+        // Rendering text
+        renderer.text_renderer.render(
+            &mut render_pass,
+            &renderer.camera.bind_group,
+            &strings_to_render,
+        );
     }
 
     // submit will accept anything that implements IntoIter
