@@ -630,7 +630,7 @@ fn new_bordered_rect_b_color(pos: Vector2<f32>, extents: Vector2<f32>, b_c: v4) 
     BorderedRect {
         pos,
         extents,
-        border_width: 6.0,
+        border_width: 8.0,
         border_color: b_c, //pink
         // border_color: Vector4::new(0.15, 0.7, 0.7, 1.0), //teal
         fill_color: Vector4::new(1.0, 1.0, 1.0, 0.3),

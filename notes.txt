@@ -1,5 +1,11 @@
 Todo:
 
+(bug fixes) IMPORTANT
+
+- when the line gets cleared, reset the tween of all blocks on top
+
+other:
+
 - make a pipeline for a background for when the GUI is on the screen
     - a vignette effect could be cool
     - animate the vignette on transition (have to play with time)
@@ -8,6 +14,9 @@ Todo:
     - black bars
 
 - figure out post-processing!
+
+- score?
+- maybe some disappear animation when the line gets cleared
 
 -----------------------------------------------------------------
 

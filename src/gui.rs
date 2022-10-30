@@ -14,6 +14,7 @@ type Key = String;
 pub struct Gui {
     mouse_x: f32,
     mouse_y: f32,
+    cam_pos: v2,
     mouse_down: bool,
     widgets_prev: HashMap<Key, Widget>,
     pub widgets: Vec<Widget>,
@@ -58,14 +59,19 @@ pub struct Widget {
 
 // Check whether current mouse position is within a rectangle
 fn regionhit(gui: &Gui, x: f32, y: f32, w: f32, h: f32) -> bool {
-    if gui.mouse_x < x || gui.mouse_y < y || gui.mouse_x >= x + w || gui.mouse_y >= y + h {
+
+    let mut mouse_and_cam: v2 = v2::new(0.,0.);
+    mouse_and_cam.x = gui.mouse_x - gui.cam_pos.x;
+    mouse_and_cam.y = gui.mouse_y - gui.cam_pos.y;
+
+    if mouse_and_cam.x < x || mouse_and_cam.y < y || mouse_and_cam.x >= x + w || mouse_and_cam.y >= y + h {
         return false;
     }
 
     return true;
 }
 
-pub fn gui_frame_start(gui: &mut Gui, mouse_x: f32, mouse_y: f32, mouse_down: bool, dt: Duration) {
+pub fn gui_frame_start(gui: &mut Gui, mouse_x: f32, mouse_y: f32, cam_pos: v2, mouse_down: bool, dt: Duration) {
 
     //advance t
 
@@ -78,6 +84,7 @@ pub fn gui_frame_start(gui: &mut Gui, mouse_x: f32, mouse_y: f32, mouse_down: bo
 
     gui.mouse_x = mouse_x;
     gui.mouse_y = mouse_y;
+    gui.cam_pos = cam_pos;
     gui.mouse_down = mouse_down;
 
     if !gui.was_hot && gui.hot.is_some() {
@@ -123,6 +130,7 @@ pub fn init_gui() -> Gui {
     Gui {
         mouse_x: 0.0,
         mouse_y: 0.0,
+        cam_pos: v2::new(0.,0.),
         mouse_down: false,
         widgets_prev: HashMap::with_capacity(WIDGETS_MAX),
         widgets: Vec::with_capacity(WIDGETS_MAX),

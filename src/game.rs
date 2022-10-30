@@ -5,14 +5,13 @@ use libs::rand;
 use libs::rand::seq::SliceRandom;
 use libs::thunderdome::{Arena, Index};
 use std::collections::{HashMap, VecDeque};
-use std::mem::transmute;
+use std::ops::{Add, Mul};
 use std::time::Duration;
-use std::ops::{Mul, Add};
 
 pub type v2 = Vector2<f32>;
+pub type v3 = Vector3<f32>;
 pub type v4 = Vector4<f32>;
 pub type v2i = Vector2<i32>;
-pub type v3 = Vector3<f32>;
 pub type v3i = Vector3<i32>;
 
 // (0,0) is bottom left (of grid)
@@ -24,10 +23,8 @@ const ACTIVE_BLOCK_START_POS: v2i = v2i::new(3, 20);
 const HOLD_BLOCK_POS: v2 = v2::new(30.0, BLOCK_SIZE * 10.0);
 const NEXT_BLOCKS_COUNT: usize = 5;
 const FIRST_BLOCK_POS_Y: f32 = 250.0;
-
-pub fn foo(a: i32, b: i32) -> i32 {
-    a + b
-}
+const BLOCKS_TWEEN_DURATION: u64 = 150;
+const BLOCK_FALL_DURATION:u64 = 1000;
 
 #[derive(Copy, Clone, Debug)]
 enum BlockSetType {
@@ -42,7 +39,7 @@ enum BlockSetType {
 const BLOCK_COUNT: usize = 8;
 
 #[repr(u32)]
-#[derive(Clone,Copy)]
+#[derive(Clone, Copy)]
 pub enum EaseFunction {
     Linear,
     CircOut,
@@ -72,7 +69,8 @@ pub fn tween_mix_v4(v1: v4, v2: v4, t: f32) -> v4 {
 }
 
 pub fn tween_get_value<T>(tween: &Tween<T>) -> T
-    where T: Mul<f32, Output = T> + Add<T, Output = T> + Copy + Clone
+where
+    T: Mul<f32, Output = T> + Add<T, Output = T> + Copy + Clone,
 {
     let t = match tween.ease_func {
         EaseFunction::Linear => tween.t,
@@ -95,11 +93,11 @@ pub fn tween_get_value<T>(tween: &Tween<T>) -> T
             }
         }
         EaseFunction::EaseOutElastic => {
-            const C4: f32 = (2.0 * std::f32::consts::PI) / 3.0;
+            const C4: f32 = (2.0 * std::f32::consts::PI) / 5.0;
 
-            if tween.t == 0.0 {
+            if tween.t < 0.0 {
                 0.0
-            } else if tween.t == 1.0 {
+            } else if tween.t > 1.0 {
                 1.0
             } else {
                 f32::powf(2.0, -10.0 * tween.t) * f32::sin((tween.t * 10.0 - 0.75) * C4) + 1.0
@@ -109,6 +107,26 @@ pub fn tween_get_value<T>(tween: &Tween<T>) -> T
     };
 
     tween.start * (1.0 - t) + tween.end * t
+}
+
+pub fn tween_new_pos<T>(tween: &Tween<T>, new_start: T, new_end: T) -> Tween<T>
+where
+    T: Copy + Clone,
+{
+    Tween {
+        start: new_start,
+        end: new_end,
+        ease_func: tween.ease_func,
+        duration: tween.duration,
+        t: 0.,
+    }
+}
+
+#[derive(PartialEq)]
+enum GameState {
+    Menu,
+    Playing,
+    Pause,
 }
 
 pub struct Game {
@@ -124,9 +142,8 @@ pub struct Game {
     next_block_index: usize,
     rng: rand::rngs::ThreadRng,
     pub gui: Gui,
-    magic_number: u32,
-
-    tween_test: Tween<f32>,
+    current_slide: i32,
+    game_state: GameState,
 }
 
 struct StaticBlockSet {
@@ -154,6 +171,7 @@ pub struct Camera {
     pub initial_size: Vector2<f32>,
     pub position: Vector2<f32>,
     pub zoom_amount: f32,
+    pub tween: Tween<v2>,
 }
 
 pub struct Grid {
@@ -166,6 +184,8 @@ pub struct Grid {
 
 // cute block colors
 pub mod color {
+    use libs::rand::Rng;
+
     use crate::game::v4;
 
     pub const RED: v4 = v4::new(1.0, 0.0, 0.0, 1.0);
@@ -177,12 +197,16 @@ pub mod color {
     pub const COLOR_3: v4 = v4::new(0.039, 1., 0.647, 1.0);
     pub const COLORS: [v4; 7] = [RED, GREEN, PINK, YELLOW, COLOR_1, COLOR_2, COLOR_3];
 
-    pub const NORMAL_MENU_BORDER_COLOR: v4 = PINK;
-    pub const HOT_MENU_BORDER_COLOR: v4 = RED;
-
     pub const GHOST: v4 = v4::new(1., 1., 1., 0.3);
     pub const GRID_BG: v4 = v4::new(1., 1., 1., 0.1);
     pub const HUD_BG: v4 = v4::new(0., 0., 0., 1.);
+
+    pub const NORMAL_MENU_BORDER_COLOR: v4 = v4::new(1., 1., 1., 0.5);
+    pub const HOT_MENU_BORDER_COLOR: v4 = PINK;
+
+    pub fn get_random(rng: &mut libs::rand::rngs::ThreadRng) -> v4 {
+        COLORS[rng.gen_range(0..COLORS.len())]
+    }
 }
 
 impl Camera {
@@ -787,6 +811,26 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet, blocks: &mut Arena<
             }
         }
     }
+
+    // checking if game over
+    // getting higher
+    let mut game_over = false;
+    for i in grid.block_positions.iter() {
+        if i.0.y >= grid.height as i32 {
+            game_over = true;
+            break;
+        }
+    }
+
+    if game_over {
+        //clearing all grid blocks from arena
+        for i in grid.block_positions.iter() {
+            blocks.remove(*i.1);
+        }
+
+        grid.block_positions.clear();
+        println!("game over");
+    }
 }
 
 impl Block {
@@ -794,20 +838,15 @@ impl Block {
         let tween = Tween {
             start: pos,
             end: pos,
-            duration: Duration::from_millis(1000),
+            duration: Duration::from_millis(BLOCKS_TWEEN_DURATION),
             ease_func: EaseFunction::CircOut,
-            t: 0.
+            t: 0.,
         };
 
-        Self {
-            pos,
-            color,
-            tween
-        }
+        Self { pos, color, tween }
     }
 
     fn update_target_pos<const INTERPOLATE: bool>(&mut self, new_pos: v2) {
-
         let (start, end) = if INTERPOLATE {
             (self.pos, new_pos)
         } else {
@@ -818,19 +857,14 @@ impl Block {
             self.pos = new_pos;
         }
 
-        self.tween = Tween {
-            start,
-            end,
-            duration: Duration::from_millis(300),
-            ease_func: self.tween.ease_func,
-            t: 0.0
-        };
+        self.tween = tween_new_pos(&self.tween, start, end);
     }
 }
 
 impl Game {
     pub fn new(cam_initial_size: Vector2<u32>) -> Self {
         let mut arena = Arena::new();
+
         let grid_pos = Vector2::new(
             BLOCK_SIZE * 6.0 + 10.,
             cam_initial_size.y as f32 - BLOCK_SIZE * 2. - 10.,
@@ -843,8 +877,6 @@ impl Game {
             width: GRID_WIDTH,
             height: GRID_HEIGHT,
         };
-
-        foo(1, 2);
 
         //making background
         for x in -1i32..=grid.width as i32 {
@@ -867,6 +899,8 @@ impl Game {
         // use strum::IntoEnumIterator;
         // self.swap_active_block_set(BlockSetType::iter().get(rand_index).unwrap());
 
+        let mut rng = rand::thread_rng();
+
         let mut next_block_types: Vec<BlockSetType> = Vec::with_capacity(BLOCK_COUNT * 2);
 
         for _ in 0..2 {
@@ -879,7 +913,6 @@ impl Game {
             next_block_types.push(BlockSetType::Z);
         }
 
-        let mut rng = rand::thread_rng();
         next_block_types.as_mut_slice().shuffle(&mut rng);
 
         let mut next_blocks: VecDeque<StaticBlockSet> =
@@ -915,14 +948,91 @@ impl Game {
             block_set.update_pos::<false>(block_pos, &mut arena);
         }
 
-        //test tween
-        let tween_test = Tween {
-            start: -600.0,
-            end: 0.0,
-            duration: Duration::from_millis(1500),
-            ease_func: EaseFunction::EaseOutBounce,
-            t: 0.0,
+        let current_slide: i32 = 1;
+        let cam_initial_pos: v2 = v2::new(
+            (crate::WINDOW_INNER_WIDTH as f32) * current_slide as f32,
+            0.,
+        );
+
+        fn pos_slide(slide: i32, pos: v2) -> v2 {
+            let mut res = pos;
+            res.x += slide as f32 * crate::WINDOW_INNER_WIDTH as f32 * -1.0;
+            res
+        }
+
+        let end_y = 6;
+
+        let logo_pos_x = crate::WINDOW_INNER_WIDTH as f32 / 2.0 - (BLOCK_SIZE * 23.0) / 2.0;
+
+        // tetris logo test
+        let mut draw_blocs_hor = |y, bloc_arr: &[i32]| {
+            for i in 0..bloc_arr.len() {
+                if bloc_arr[i] == 0 {
+                    continue;
+                }
+
+                let bloc_pos = pos_slide(
+                    current_slide,
+                    v2::new(logo_pos_x + BLOCK_SIZE * i as f32, BLOCK_SIZE * y as f32),
+                );
+
+                let color = if i <= 3 {
+                    color::COLORS[2]
+                } else if i <= 7 {
+                    color::COLORS[4]
+                } else if i <= 11 {
+                    color::COLORS[2]
+                } else if i <= 15 {
+                    color::COLORS[4]
+                } else if i <= 19 {
+                    color::COLORS[2]
+                } else {
+                    color::COLORS[4]
+                };
+
+                let mut bloc = Block::new(bloc_pos, color);
+                bloc.tween = Tween {
+                    start: bloc.pos - v2::new(0., 230.0),
+                    end: bloc.pos,
+                    duration: Duration::from_millis(700),
+                    ease_func: EaseFunction::EaseOutElastic,
+                    t: 0.0 - ((i as f32) * 0.06) - ((end_y - y) as f32 * 0.06),
+                };
+
+                arena.insert(bloc);
+            }
         };
+
+        draw_blocs_hor(
+            2,
+            &[
+                1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1,
+            ],
+        );
+        draw_blocs_hor(
+            3,
+            &[
+                0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0,
+            ],
+        );
+        draw_blocs_hor(
+            4,
+            &[
+                0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0,
+            ],
+        );
+        draw_blocs_hor(
+            5,
+            &[
+                0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1,
+            ],
+        );
+        draw_blocs_hor(
+            6,
+            &[
+                0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0,
+            ],
+        );
 
         let mut game = Self {
             blocks: arena,
@@ -931,8 +1041,15 @@ impl Game {
             tick_timer: Duration::from_secs(0),
             camera: Camera {
                 initial_size: Vector2::new(cam_initial_size.x as f32, cam_initial_size.y as f32),
-                position: Vector2::new(0., 0.),
+                position: cam_initial_pos,
                 zoom_amount: 1.0,
+                tween: Tween {
+                    start: cam_initial_pos,
+                    end: cam_initial_pos,
+                    duration: Duration::from_millis(2000),
+                    ease_func: EaseFunction::EaseOutBounce,
+                    t: 0.0,
+                },
             },
             hold_block_preview: None,
             hold_enabled: true,
@@ -940,9 +1057,9 @@ impl Game {
             next_block_types,
             next_block_index: 0,
             rng,
+            current_slide,
             gui: init_gui(),
-            magic_number: 4,
-            tween_test,
+            game_state: GameState::Menu,
         };
 
         game.swap_active_block_set_from_next_blocks();
@@ -982,7 +1099,20 @@ impl Game {
 
                 act_block.update_pos::<true>(&self.grid, new_pos, &mut self.blocks);
 
+                //changing tween of blocks
+                for i in act_block.static_block_set.blocks.iter() {
+                    let b = &mut self.blocks[*i];
+                    b.tween = Tween {
+                        start: b.tween.start,
+                        end: b.tween.end,
+                        duration: Duration::from_millis(BLOCK_FALL_DURATION),
+                        ease_func: EaseFunction::EaseOutBounce,
+                        t: 0.
+                    };
+                }
+
                 put_down_act_block(&mut self.grid, act_block, &mut self.blocks);
+
                 self.hold_enabled = true;
                 //spawn new block
                 spawn_new_random_block = true;
@@ -1166,65 +1296,82 @@ impl Game {
 }
 
 fn draw_gui(game: &mut Game, _input: &Input) {
-    let gui = &mut game.gui;
-    let gui_x = tween_get_value(&game.tween_test);
-
     gui_bind_layout(
-        gui,
-        Layout::VerticalCentered(v2::new(200.0, 80.0), v2::new(gui_x, 0.0)),
+        &mut game.gui,
+        Layout::VerticalCentered(
+            v2::new(200.0, 80.0),
+            v2::new(-(crate::WINDOW_INNER_WIDTH as f32), 0.0),
+        ),
     );
-    for i in 0..game.magic_number {
-        if do_button(gui, format!("Play {}", i).into()) {
-            println!("pressed hello {}", i);
-        }
+
+    if do_button(&mut game.gui, "Play".into()) {
+        println!("pressed play");
+        game_restart(game);
+        go_to_slide(game, 0);
+    }
+    if do_button(&mut game.gui, "Controls".into()) {
+        println!("pressed controls");
+    }
+    if do_button(&mut game.gui, "Quit".into()) {
+        println!("pressed quit");
     }
 }
 
-pub fn game_update(game: &mut Game, input: &Input, dt: Duration) {
-    game.tick_timer += dt;
-
-    //updating tweens
-    game.tween_test.t += dt.as_micros() as f32 / game.tween_test.duration.as_micros() as f32;
-    if game.tween_test.t > 1.0 {
-        game.tween_test.t = 1.0;
-    }
-
-    gui_frame_start(
-        &mut game.gui,
-        input.mouse_x,
-        input.mouse_y,
-        input.get_key(Keys::Mouse1),
-        dt,
+fn go_to_slide(game: &mut Game, slide: i32) {
+    game.camera.tween = tween_new_pos(
+        &game.camera.tween,
+        game.camera.position,
+        v2::new((crate::WINDOW_INNER_WIDTH as f32) * (slide) as f32, 0.),
     );
+    game.current_slide = slide;
+}
 
-    if game.tick_timer.as_millis() >= 400 {
-        //perform tick
-        game.down_tick();
-        game.tick_timer -= Duration::from_millis(400);
+fn game_restart(game: &mut Game) {
+    // @TODO(lucypero): reset score i guess, when u have it
+    game.tick_timer = Duration::from_secs(0);
+    game.game_state = GameState::Playing;
+
+    //clearing all grid blocks
+    for i in game.grid.block_positions.iter() {
+        game.blocks.remove(*i.1);
     }
+    game.grid.block_positions.clear();
 
-    if input.get_key_down(Keys::NumpadAdd) {
-        let mut next_ease = game.tween_test.ease_func as u32 + 1;
-        if next_ease == EaseFunction::COUNT as u32 {
-            next_ease = 0;
-        }
-        game.tween_test.ease_func = unsafe { transmute(next_ease) };
-        game.tween_test.t = 0.0;
-    }
-
-    static mut CONTROL_CAMERA: bool = false;
-
-    unsafe {
-        if input.get_key_down(Keys::Down) {
-            CONTROL_CAMERA = !CONTROL_CAMERA;
+    //clearing all blocks from active set
+    if let Some(ab) = &game.active_block_set {
+        for i in ab.blocks_ghost.iter() {
+            game.blocks.remove(*i);
         }
 
-        if CONTROL_CAMERA {
-            game.camera.do_move_controls(&input);
-        } else {
-            game.do_block_controls(&input);
+        for i in ab.static_block_set.blocks.iter() {
+            game.blocks.remove(*i);
+        }
+    };
+
+    game.swap_active_block_set_from_next_blocks();
+
+    if let Some(hold) = &mut game.hold_block_preview {
+        for i in hold.blocks.iter() {
+            game.blocks.remove(*i);
         }
     }
+
+    game.hold_block_preview = None;
+    game.hold_enabled = true;
+}
+
+pub fn game_update(game: &mut Game, input: &Input, dt: Duration) {
+    //animating camera
+    {
+        game.camera.tween.t +=
+            dt.as_micros() as f32 / game.camera.tween.duration.as_micros() as f32;
+        if game.camera.tween.t > 1.0 {
+            game.camera.tween.t = 1.0;
+        }
+
+        game.camera.position = tween_get_value(&game.camera.tween);
+    }
+
 
     // updating all block positions
     for (_, b) in game.blocks.iter_mut() {
@@ -1236,6 +1383,85 @@ pub fn game_update(game: &mut Game, input: &Input, dt: Duration) {
 
         b.pos = tween_get_value(&b.tween);
     }
+
+    // moving between slides
+    {
+        if input.get_key_down(Keys::Up) {
+            game.camera.tween = tween_new_pos(
+                &game.camera.tween,
+                game.camera.position,
+                v2::new(
+                    (crate::WINDOW_INNER_WIDTH as f32) * (game.current_slide - 1) as f32,
+                    0.,
+                ),
+            );
+
+            game.current_slide -= 1;
+        }
+
+        if input.get_key_down(Keys::Down) {
+            game.camera.tween = tween_new_pos(
+                &game.camera.tween,
+                game.camera.position,
+                v2::new(
+                    (crate::WINDOW_INNER_WIDTH as f32) * (game.current_slide + 1) as f32,
+                    0.,
+                ),
+            );
+
+            game.current_slide += 1;
+        }
+    }
+
+    //game state-specific stuff/controls
+    match game.game_state {
+        GameState::Menu => {}
+        GameState::Playing => {
+
+            // tick timer (block drop)
+            game.tick_timer += dt;
+
+            if game.tick_timer.as_millis() >= 400 {
+                //perform tick
+                game.down_tick();
+                game.tick_timer -= Duration::from_millis(400);
+            }
+
+
+            game.do_block_controls(&input);
+            // do controls
+        }
+        GameState::Pause => {}
+    }
+
+    //debug stuff
+
+    //pause game
+    if input.get_key_down(Keys::NumpadAdd) {
+        if game.game_state == GameState::Playing {
+            game.game_state = GameState::Pause;
+        } else if game.game_state == GameState::Pause {
+            game.game_state = GameState::Playing;
+        }
+    }
+
+    //reset game
+    if input.get_key_down(Keys::NumpadSubtract) {
+        game_restart(game);
+    }
+
+
+
+    // gui stuff
+
+    gui_frame_start(
+        &mut game.gui,
+        input.mouse_x,
+        input.mouse_y,
+        game.camera.position,
+        input.get_key(Keys::Mouse1),
+        dt,
+    );
 
     draw_text_pos(
         &mut game.gui,

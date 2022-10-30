@@ -70,7 +70,7 @@ pub fn init_text_renderer(
     });
 
     let char_map =
-        unsafe { render_font(&device, &queue, &sampler, "assets/Roboto.ttf".into(), 22) };
+        unsafe { render_font(&device, &queue, &sampler, "assets/PaytoneOne.ttf".into(), 30) };
 
     // make the text vertex buffer
     let zeroed_verts = vec![0_u8; 6 * std::mem::size_of::<Vertex>() * MAX_CHARACTERS_ON_SCREEN];
