@@ -19,12 +19,16 @@ pub const BLOCK_SIZE: f32 = 32.0;
 pub const GRID_WIDTH: usize = 10;
 pub const GRID_HEIGHT: usize = 20;
 
+const STRAIGHT_TO_PLAY: bool = false;
+
 const ACTIVE_BLOCK_START_POS: v2i = v2i::new(3, 20);
 const HOLD_BLOCK_POS: v2 = v2::new(30.0, BLOCK_SIZE * 10.0);
 const NEXT_BLOCKS_COUNT: usize = 5;
 const FIRST_BLOCK_POS_Y: f32 = 250.0;
 const BLOCKS_TWEEN_DURATION: u64 = 150;
-const BLOCK_FALL_DURATION:u64 = 1000;
+const BLOCK_FALL_DURATION: u64 = 1000;
+const BLOCK_LINE_CLEAR_TWEEN_DURATION: u64 = 500;
+const BLOCK_DISSAPEAR_TWEEN_DURATION: u64 = 1000;
 
 #[derive(Copy, Clone, Debug)]
 enum BlockSetType {
@@ -164,7 +168,12 @@ struct BlockSet {
 pub struct Block {
     pub pos: v2,
     pub color: v4,
+    /// position tween
     pub tween: Tween<v2>,
+    /// color tween
+    pub color_tween: Tween<v4>,
+    /// if it is dead, it should be removed from arena when color_tween.t == 1.
+    pub is_dead: bool,
 }
 
 pub struct Camera {
@@ -791,9 +800,24 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet, blocks: &mut Arena<
             if let Some(b_index) = b_index {
                 // removing the actual block
                 // u gotta remove the actual block on the arena or disable it or something
-                blocks.remove(b_index);
                 // let nowhere_pos = Vector2::new(-500., 0.);
                 // blocks[b_index].update_target_pos::<false>(nowhere_pos);
+
+                //starting alpha tween
+
+                //blocks.remove(b_index);
+
+                let b = &mut blocks[b_index];
+
+                b.is_dead = true;
+
+                b.color_tween = Tween {
+                    start: b.color,
+                    end: v4::new(b.color.x, b.color.y, b.color.z, 0.0),
+                    duration: Duration::from_millis(BLOCK_DISSAPEAR_TWEEN_DURATION),
+                    ease_func: EaseFunction::CircOut,
+                    t: 0.0,
+                }
             }
         }
 
@@ -806,7 +830,12 @@ fn put_down_act_block(grid: &mut Grid, act_block: &BlockSet, blocks: &mut Arena<
                     grid.block_positions.insert(pos_to_shift, block_index);
                     //update the block position
                     blocks[block_index]
-                        .update_target_pos::<true>(grid.get_real_position(pos_to_shift))
+                        .update_target_pos::<true>(grid.get_real_position(pos_to_shift));
+
+                    //change tween to "blocks adjusting to lines cleared below" tween
+                    blocks[block_index].tween.duration =
+                        Duration::from_millis(BLOCK_LINE_CLEAR_TWEEN_DURATION);
+                    blocks[block_index].tween.ease_func = EaseFunction::EaseOutBounce;
                 }
             }
         }
@@ -843,7 +872,21 @@ impl Block {
             t: 0.,
         };
 
-        Self { pos, color, tween }
+        let color_tween = Tween {
+            start: color,
+            end: color,
+            duration: Duration::from_secs(0),
+            ease_func: EaseFunction::Linear,
+            t: 1.,
+        };
+
+        Self {
+            pos,
+            color,
+            tween,
+            color_tween,
+            is_dead: false,
+        }
     }
 
     fn update_target_pos<const INTERPOLATE: bool>(&mut self, new_pos: v2) {
@@ -861,212 +904,221 @@ impl Block {
     }
 }
 
-impl Game {
-    pub fn new(cam_initial_size: Vector2<u32>) -> Self {
-        let mut arena = Arena::new();
+pub fn game_new(cam_initial_size: Vector2<u32>) -> Game {
+    let mut arena = Arena::new();
 
-        let grid_pos = Vector2::new(
-            BLOCK_SIZE * 6.0 + 10.,
-            cam_initial_size.y as f32 - BLOCK_SIZE * 2. - 10.,
-        );
-        let grid_positions = HashMap::new();
+    let grid_pos = Vector2::new(
+        BLOCK_SIZE * 6.0 + 10.,
+        cam_initial_size.y as f32 - BLOCK_SIZE * 2. - 10.,
+    );
+    let grid_positions = HashMap::new();
 
-        let grid = Grid {
-            block_positions: grid_positions,
-            pos: grid_pos,
-            width: GRID_WIDTH,
-            height: GRID_HEIGHT,
-        };
+    let grid = Grid {
+        block_positions: grid_positions,
+        pos: grid_pos,
+        width: GRID_WIDTH,
+        height: GRID_HEIGHT,
+    };
 
-        //making background
-        for x in -1i32..=grid.width as i32 {
-            for y in -1i32..grid.height as i32 {
-                let pos = v2i::new(x, y);
-                let real_pos = grid.get_real_position(pos);
+    //making background
+    for x in -1i32..=grid.width as i32 {
+        for y in -1i32..grid.height as i32 {
+            let pos = v2i::new(x, y);
+            let real_pos = grid.get_real_position(pos);
 
-                let color = if x >= 0 && x < grid.width as i32 && y >= 0 && y < grid.height as i32 {
-                    color::GRID_BG
-                } else {
-                    color::HUD_BG
-                };
-
-                arena.insert(Block::new(real_pos, color));
-            }
-        }
-
-        //do the random next list
-
-        // use strum::IntoEnumIterator;
-        // self.swap_active_block_set(BlockSetType::iter().get(rand_index).unwrap());
-
-        let mut rng = rand::thread_rng();
-
-        let mut next_block_types: Vec<BlockSetType> = Vec::with_capacity(BLOCK_COUNT * 2);
-
-        for _ in 0..2 {
-            next_block_types.push(BlockSetType::T);
-            next_block_types.push(BlockSetType::Square);
-            next_block_types.push(BlockSetType::Line);
-            next_block_types.push(BlockSetType::L);
-            next_block_types.push(BlockSetType::J);
-            next_block_types.push(BlockSetType::S);
-            next_block_types.push(BlockSetType::Z);
-        }
-
-        next_block_types.as_mut_slice().shuffle(&mut rng);
-
-        let mut next_blocks: VecDeque<StaticBlockSet> =
-            VecDeque::with_capacity(NEXT_BLOCKS_COUNT + 1);
-
-        for i in 0..NEXT_BLOCKS_COUNT + 1 {
-            next_blocks.push_back(match next_block_types[i] {
-                BlockSetType::T => StaticBlockSet::new_t(&mut arena),
-                BlockSetType::Square => StaticBlockSet::new_square(&mut arena),
-                BlockSetType::Line => StaticBlockSet::new_line(&mut arena),
-                BlockSetType::L => StaticBlockSet::new_l(&mut arena),
-                BlockSetType::J => StaticBlockSet::new_j(&mut arena),
-                BlockSetType::S => StaticBlockSet::new_s(&mut arena),
-                BlockSetType::Z => StaticBlockSet::new_z(&mut arena),
-            });
-        }
-
-        // positioning the next blocks
-
-        for (i, block_set) in next_blocks.iter_mut().enumerate() {
-            let mut block_pos = v2::new(
-                grid.pos.x + (GRID_WIDTH + 2) as f32 * BLOCK_SIZE + 20.0,
-                FIRST_BLOCK_POS_Y,
-            );
-
-            if i >= NEXT_BLOCKS_COUNT {
-                block_pos.x += 1000.0; //has to be past window size
-                block_pos.y += BLOCK_SIZE * 4.0 * (NEXT_BLOCKS_COUNT - 1) as f32;
+            let color = if x >= 0 && x < grid.width as i32 && y >= 0 && y < grid.height as i32 {
+                color::GRID_BG
             } else {
-                block_pos.y += BLOCK_SIZE * 4.0 * i as f32;
-            }
+                color::HUD_BG
+            };
 
-            block_set.update_pos::<false>(block_pos, &mut arena);
+            arena.insert(Block::new(real_pos, color));
         }
-
-        let current_slide: i32 = 1;
-        let cam_initial_pos: v2 = v2::new(
-            (crate::WINDOW_INNER_WIDTH as f32) * current_slide as f32,
-            0.,
-        );
-
-        fn pos_slide(slide: i32, pos: v2) -> v2 {
-            let mut res = pos;
-            res.x += slide as f32 * crate::WINDOW_INNER_WIDTH as f32 * -1.0;
-            res
-        }
-
-        let end_y = 6;
-
-        let logo_pos_x = crate::WINDOW_INNER_WIDTH as f32 / 2.0 - (BLOCK_SIZE * 23.0) / 2.0;
-
-        // tetris logo test
-        let mut draw_blocs_hor = |y, bloc_arr: &[i32]| {
-            for i in 0..bloc_arr.len() {
-                if bloc_arr[i] == 0 {
-                    continue;
-                }
-
-                let bloc_pos = pos_slide(
-                    current_slide,
-                    v2::new(logo_pos_x + BLOCK_SIZE * i as f32, BLOCK_SIZE * y as f32),
-                );
-
-                let color = if i <= 3 {
-                    color::COLORS[2]
-                } else if i <= 7 {
-                    color::COLORS[4]
-                } else if i <= 11 {
-                    color::COLORS[2]
-                } else if i <= 15 {
-                    color::COLORS[4]
-                } else if i <= 19 {
-                    color::COLORS[2]
-                } else {
-                    color::COLORS[4]
-                };
-
-                let mut bloc = Block::new(bloc_pos, color);
-                bloc.tween = Tween {
-                    start: bloc.pos - v2::new(0., 230.0),
-                    end: bloc.pos,
-                    duration: Duration::from_millis(700),
-                    ease_func: EaseFunction::EaseOutElastic,
-                    t: 0.0 - ((i as f32) * 0.06) - ((end_y - y) as f32 * 0.06),
-                };
-
-                arena.insert(bloc);
-            }
-        };
-
-        draw_blocs_hor(
-            2,
-            &[
-                1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1,
-            ],
-        );
-        draw_blocs_hor(
-            3,
-            &[
-                0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0,
-            ],
-        );
-        draw_blocs_hor(
-            4,
-            &[
-                0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0,
-            ],
-        );
-        draw_blocs_hor(
-            5,
-            &[
-                0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1,
-            ],
-        );
-        draw_blocs_hor(
-            6,
-            &[
-                0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0,
-            ],
-        );
-
-        let mut game = Self {
-            blocks: arena,
-            active_block_set: None,
-            grid,
-            tick_timer: Duration::from_secs(0),
-            camera: Camera {
-                initial_size: Vector2::new(cam_initial_size.x as f32, cam_initial_size.y as f32),
-                position: cam_initial_pos,
-                zoom_amount: 1.0,
-                tween: Tween {
-                    start: cam_initial_pos,
-                    end: cam_initial_pos,
-                    duration: Duration::from_millis(2000),
-                    ease_func: EaseFunction::EaseOutBounce,
-                    t: 0.0,
-                },
-            },
-            hold_block_preview: None,
-            hold_enabled: true,
-            next_blocks,
-            next_block_types,
-            next_block_index: 0,
-            rng,
-            current_slide,
-            gui: init_gui(),
-            game_state: GameState::Menu,
-        };
-
-        game.swap_active_block_set_from_next_blocks();
-
-        game
     }
 
+    //do the random next list
+
+    // use strum::IntoEnumIterator;
+    // self.swap_active_block_set(BlockSetType::iter().get(rand_index).unwrap());
+
+    let mut rng = rand::thread_rng();
+
+    let mut next_block_types: Vec<BlockSetType> = Vec::with_capacity(BLOCK_COUNT * 2);
+
+    for _ in 0..2 {
+        next_block_types.push(BlockSetType::T);
+        next_block_types.push(BlockSetType::Square);
+        next_block_types.push(BlockSetType::Line);
+        next_block_types.push(BlockSetType::L);
+        next_block_types.push(BlockSetType::J);
+        next_block_types.push(BlockSetType::S);
+        next_block_types.push(BlockSetType::Z);
+    }
+
+    next_block_types.as_mut_slice().shuffle(&mut rng);
+
+    let mut next_blocks: VecDeque<StaticBlockSet> = VecDeque::with_capacity(NEXT_BLOCKS_COUNT + 1);
+
+    for i in 0..NEXT_BLOCKS_COUNT + 1 {
+        next_blocks.push_back(match next_block_types[i] {
+            BlockSetType::T => StaticBlockSet::new_t(&mut arena),
+            BlockSetType::Square => StaticBlockSet::new_square(&mut arena),
+            BlockSetType::Line => StaticBlockSet::new_line(&mut arena),
+            BlockSetType::L => StaticBlockSet::new_l(&mut arena),
+            BlockSetType::J => StaticBlockSet::new_j(&mut arena),
+            BlockSetType::S => StaticBlockSet::new_s(&mut arena),
+            BlockSetType::Z => StaticBlockSet::new_z(&mut arena),
+        });
+    }
+
+    // positioning the next blocks
+
+    for (i, block_set) in next_blocks.iter_mut().enumerate() {
+        let mut block_pos = v2::new(
+            grid.pos.x + (GRID_WIDTH + 2) as f32 * BLOCK_SIZE + 20.0,
+            FIRST_BLOCK_POS_Y,
+        );
+
+        if i >= NEXT_BLOCKS_COUNT {
+            block_pos.x += 1000.0; //has to be past window size
+            block_pos.y += BLOCK_SIZE * 4.0 * (NEXT_BLOCKS_COUNT - 1) as f32;
+        } else {
+            block_pos.y += BLOCK_SIZE * 4.0 * i as f32;
+        }
+
+        block_set.update_pos::<false>(block_pos, &mut arena);
+    }
+
+    let current_slide: i32 = if STRAIGHT_TO_PLAY { 0 } else { 1 };
+
+    let cam_initial_pos: v2 = v2::new(
+        (crate::WINDOW_INNER_WIDTH as f32) * current_slide as f32,
+        0.,
+    );
+
+    let camera = Camera {
+        initial_size: Vector2::new(cam_initial_size.x as f32, cam_initial_size.y as f32),
+        position: cam_initial_pos,
+        zoom_amount: 1.0,
+        tween: Tween {
+            start: cam_initial_pos,
+            end: cam_initial_pos,
+            duration: Duration::from_millis(2000),
+            ease_func: EaseFunction::EaseOutBounce,
+            t: 0.0,
+        },
+    };
+
+    fn pos_slide(slide: i32, pos: v2) -> v2 {
+        let mut res = pos;
+        res.x += slide as f32 * crate::WINDOW_INNER_WIDTH as f32 * -1.0;
+        res
+    }
+
+    let end_y = 6;
+
+    let logo_pos_x = crate::WINDOW_INNER_WIDTH as f32 / 2.0 - (BLOCK_SIZE * 23.0) / 2.0;
+
+    // tetris logo test
+    let mut draw_blocs_hor = |y, bloc_arr: &[i32]| {
+        for i in 0..bloc_arr.len() {
+            if bloc_arr[i] == 0 {
+                continue;
+            }
+
+            let bloc_pos = pos_slide(
+                1,
+                v2::new(logo_pos_x + BLOCK_SIZE * i as f32, BLOCK_SIZE * y as f32),
+            );
+
+            let color = if i <= 3 {
+                color::COLORS[2]
+            } else if i <= 7 {
+                color::COLORS[4]
+            } else if i <= 11 {
+                color::COLORS[2]
+            } else if i <= 15 {
+                color::COLORS[4]
+            } else if i <= 19 {
+                color::COLORS[2]
+            } else {
+                color::COLORS[4]
+            };
+
+            let mut bloc = Block::new(bloc_pos, color);
+            bloc.tween = Tween {
+                start: bloc.pos - v2::new(0., 230.0),
+                end: bloc.pos,
+                duration: Duration::from_millis(700),
+                ease_func: EaseFunction::EaseOutElastic,
+                t: 0.0 - ((i as f32) * 0.06) - ((end_y - y) as f32 * 0.06),
+            };
+
+            arena.insert(bloc);
+        }
+    };
+
+    draw_blocs_hor(
+        2,
+        &[
+            1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1,
+        ],
+    );
+    draw_blocs_hor(
+        3,
+        &[
+            0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0,
+        ],
+    );
+    draw_blocs_hor(
+        4,
+        &[
+            0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0,
+        ],
+    );
+    draw_blocs_hor(
+        5,
+        &[
+            0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1,
+        ],
+    );
+    draw_blocs_hor(
+        6,
+        &[
+            0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0,
+        ],
+    );
+
+    let game_state = GameState::Menu;
+
+    let mut game = Game {
+        blocks: arena,
+        active_block_set: None,
+        grid,
+        tick_timer: Duration::from_secs(0),
+        camera,
+        hold_block_preview: None,
+        hold_enabled: true,
+        next_blocks,
+        next_block_types,
+        next_block_index: 0,
+        rng,
+        current_slide,
+        gui: init_gui(),
+        game_state,
+    };
+
+    game.swap_active_block_set_from_next_blocks();
+
+    if STRAIGHT_TO_PLAY {
+        game.game_state = GameState::Playing;
+        game_restart(&mut game);
+    }
+
+    game
+}
+
+impl Game {
     fn do_block_controls(&mut self, input: &Input) {
         let mut spawn_new_random_block = false;
         let mut new_hold: Option<BlockSetType> = None;
@@ -1107,7 +1159,7 @@ impl Game {
                         end: b.tween.end,
                         duration: Duration::from_millis(BLOCK_FALL_DURATION),
                         ease_func: EaseFunction::EaseOutBounce,
-                        t: 0.
+                        t: 0.,
                     };
                 }
 
@@ -1362,19 +1414,19 @@ fn game_restart(game: &mut Game) {
 
 pub fn game_update(game: &mut Game, input: &Input, dt: Duration) {
     //animating camera
-    {
-        game.camera.tween.t +=
-            dt.as_micros() as f32 / game.camera.tween.duration.as_micros() as f32;
-        if game.camera.tween.t > 1.0 {
-            game.camera.tween.t = 1.0;
-        }
-
-        game.camera.position = tween_get_value(&game.camera.tween);
+    game.camera.tween.t += dt.as_micros() as f32 / game.camera.tween.duration.as_micros() as f32;
+    if game.camera.tween.t > 1.0 {
+        game.camera.tween.t = 1.0;
     }
 
+    game.camera.position = tween_get_value(&game.camera.tween);
 
-    // updating all block positions
-    for (_, b) in game.blocks.iter_mut() {
+    // list for blocks to delete
+    let mut blocks_to_delete: Vec<Index> = Vec::with_capacity(100);
+
+    // updating all block positions and color based on tweens
+    // it also marks dead blocks for deletion
+    for (i, b) in game.blocks.iter_mut() {
         b.tween.t += dt.as_micros() as f32 / b.tween.duration.as_micros() as f32;
 
         if b.tween.t > 1.0 {
@@ -1382,6 +1434,89 @@ pub fn game_update(game: &mut Game, input: &Input, dt: Duration) {
         }
 
         b.pos = tween_get_value(&b.tween);
+
+        // color tween
+        b.color_tween.t += dt.as_micros() as f32 / b.color_tween.duration.as_micros() as f32;
+
+        if b.color_tween.t > 1.0 {
+            b.color_tween.t = 1.;
+        }
+
+        if b.color_tween.t >= 1.0 && b.is_dead {
+            blocks_to_delete.push(i);
+        }
+
+        b.color = tween_get_value(&b.color_tween);
+
+        //playing w alpha
+        // b.color.w = b.tween.t;
+    }
+
+    //removing all dead blocks
+    for i in blocks_to_delete.iter() {
+        game.blocks.remove(*i);
+    }
+
+    //game state-specific stuff/controls
+    match game.game_state {
+        GameState::Menu => {}
+        GameState::Playing => {
+            // tick timer (block drop)
+            game.tick_timer += dt;
+
+            if game.tick_timer.as_millis() >= 400 {
+                //perform tick
+                game.down_tick();
+                game.tick_timer -= Duration::from_millis(400);
+
+                //debug, see how many blocks are in arena
+                // println!("blocks in arena: {}", game.blocks.len());
+            }
+
+            game.do_block_controls(&input);
+            // do controls
+        }
+        GameState::Pause => {}
+    }
+
+    // ---------- gui stuff --------------
+
+    gui_frame_start(
+        &mut game.gui,
+        input.mouse_x,
+        input.mouse_y,
+        game.camera.position,
+        input.get_key(Keys::Mouse1),
+        dt,
+    );
+
+    // frame time display
+    draw_text_pos(
+        &mut game.gui,
+        format!("ft: {}us", dt.as_micros()).into(),
+        v2::new(2.0, 20.0),
+    );
+
+    draw_gui(game, input);
+
+    gui_frame_end(&mut game.gui);
+
+    // ------------- /gui stuff ---------------
+
+    // ------------- debug stuff ----------------
+
+    //pause game
+    if input.get_key_down(Keys::NumpadAdd) {
+        if game.game_state == GameState::Playing {
+            game.game_state = GameState::Pause;
+        } else if game.game_state == GameState::Pause {
+            game.game_state = GameState::Playing;
+        }
+    }
+
+    //reset game
+    if input.get_key_down(Keys::NumpadSubtract) {
+        game_restart(game);
     }
 
     // moving between slides
@@ -1413,63 +1548,5 @@ pub fn game_update(game: &mut Game, input: &Input, dt: Duration) {
         }
     }
 
-    //game state-specific stuff/controls
-    match game.game_state {
-        GameState::Menu => {}
-        GameState::Playing => {
-
-            // tick timer (block drop)
-            game.tick_timer += dt;
-
-            if game.tick_timer.as_millis() >= 400 {
-                //perform tick
-                game.down_tick();
-                game.tick_timer -= Duration::from_millis(400);
-            }
-
-
-            game.do_block_controls(&input);
-            // do controls
-        }
-        GameState::Pause => {}
-    }
-
-    //debug stuff
-
-    //pause game
-    if input.get_key_down(Keys::NumpadAdd) {
-        if game.game_state == GameState::Playing {
-            game.game_state = GameState::Pause;
-        } else if game.game_state == GameState::Pause {
-            game.game_state = GameState::Playing;
-        }
-    }
-
-    //reset game
-    if input.get_key_down(Keys::NumpadSubtract) {
-        game_restart(game);
-    }
-
-
-
-    // gui stuff
-
-    gui_frame_start(
-        &mut game.gui,
-        input.mouse_x,
-        input.mouse_y,
-        game.camera.position,
-        input.get_key(Keys::Mouse1),
-        dt,
-    );
-
-    draw_text_pos(
-        &mut game.gui,
-        format!("ft: {}us", dt.as_micros()).into(),
-        v2::new(2.0, 20.0),
-    );
-
-    draw_gui(game, input);
-
-    gui_frame_end(&mut game.gui);
+    //  -------- /debug stuff -------------
 }

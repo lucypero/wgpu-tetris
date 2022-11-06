@@ -39,7 +39,7 @@ fn main() {
         .unwrap();
 
     let mut input = Input::new();
-    let mut game = Game::new(Vector2::new(inner_size.width, inner_size.height));
+    let mut game = game_new(Vector2::new(inner_size.width, inner_size.height));
     let mut renderer = renderer::init_renderer(&window, &game);
 
     let mut now = Instant::now();
